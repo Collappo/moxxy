@@ -14,8 +14,9 @@ import {
   silentLogger,
 } from '@moxxy/core';
 import type { EmbeddingProvider, PermissionResolver, Plugin } from '@moxxy/sdk';
-import { loadConfig, type EmbeddingsConfig, type MoxxyConfig } from '@moxxy/config';
+import { buildConfigPlugin, loadConfig, type EmbeddingsConfig, type MoxxyConfig } from '@moxxy/config';
 import { anthropicPlugin } from '@moxxy/plugin-provider-anthropic';
+import { openaiPlugin } from '@moxxy/plugin-provider-openai';
 import { builtinToolsPlugin } from '@moxxy/tools-builtin';
 import { toolUseLoopPlugin } from '@moxxy/loop-tool-use';
 import { planExecuteLoopPlugin } from '@moxxy/loop-plan-execute';
@@ -27,10 +28,16 @@ import {
   resolveValue,
   type VaultStore,
 } from '@moxxy/plugin-vault';
-import { buildMemoryPlugin, TfIdfEmbedder, type MemoryStore } from '@moxxy/plugin-memory';
+import {
+  buildMemoryPlugin,
+  buildMemoryConsolidatePlugin,
+  TfIdfEmbedder,
+  type MemoryStore,
+} from '@moxxy/plugin-memory';
 import { buildTelegramPlugin } from '@moxxy/plugin-telegram';
 import { cliPlugin } from '@moxxy/plugin-cli';
 import { httpChannelPlugin } from '@moxxy/plugin-channel-http';
+import { resolveProviderApiKey } from './provider-keys.js';
 
 export interface SetupOptions {
   readonly cwd: string;
@@ -41,6 +48,8 @@ export interface SetupOptions {
   readonly configPath?: string;
   readonly skipUserConfig?: boolean;
   readonly disableKeytar?: boolean;
+  /** Skip the interactive API-key prompt when no key is found. Useful for headless tooling that wants a hard error instead of a hang. */
+  readonly skipKeyPrompt?: boolean;
 }
 
 export interface SetupResult {
@@ -89,12 +98,18 @@ export async function setupSessionWithConfig(opts: SetupOptions): Promise<SetupR
 
   const builtins: Array<{ name: string; plugin: Plugin }> = [
     { name: '@moxxy/plugin-provider-anthropic', plugin: anthropicPlugin },
+    { name: '@moxxy/plugin-provider-openai', plugin: openaiPlugin },
     { name: '@moxxy/tools-builtin', plugin: builtinToolsPlugin },
     { name: '@moxxy/loop-tool-use', plugin: toolUseLoopPlugin },
     { name: '@moxxy/loop-plan-execute', plugin: planExecuteLoopPlugin },
     { name: '@moxxy/compactor-summarize', plugin: summarizeCompactorPlugin },
     { name: '@moxxy/plugin-vault', plugin: vaultPlugin },
     { name: '@moxxy/plugin-memory', plugin: memoryPlugin },
+    {
+      name: '@moxxy/memory-consolidate',
+      plugin: buildMemoryConsolidatePlugin(memory, () => session.providers.getActive()),
+    },
+    { name: '@moxxy/plugin-config', plugin: buildConfigPlugin({ cwd: opts.cwd }) },
     { name: '@moxxy/plugin-cli', plugin: cliPlugin },
     { name: '@moxxy/plugin-channel-http', plugin: httpChannelPlugin },
     { name: '@moxxy/plugin-telegram', plugin: buildTelegramPlugin({ vault }) },
@@ -110,8 +125,17 @@ export async function setupSessionWithConfig(opts: SetupOptions): Promise<SetupR
   }
 
   const providerName = config.provider?.name ?? 'anthropic';
-  const providerConfig = { ...(config.provider?.config ?? {}), ...(opts.providerConfig ?? {}) };
-  session.providers.setActive(providerName, providerConfig);
+  const initialProviderConfig = { ...(config.provider?.config ?? {}), ...(opts.providerConfig ?? {}) };
+  const { providerConfig: resolvedProviderConfig } = await resolveProviderApiKey(
+    providerName,
+    vault,
+    {
+      providerConfig: initialProviderConfig,
+      // Interactive only when stdin is a TTY AND the caller hasn't suppressed it.
+      interactive: opts.skipKeyPrompt ? false : process.stdin.isTTY === true,
+    },
+  );
+  session.providers.setActive(providerName, resolvedProviderConfig);
 
   if (config.loop) {
     session.loops.setActive(config.loop);

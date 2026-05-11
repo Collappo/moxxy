@@ -1,7 +1,7 @@
 {
-  "name": "@moxxy/config",
+  "name": "@moxxy/plugin-provider-openai",
   "version": "0.0.0",
-  "description": "defineConfig + moxxy.config.ts loader. Walks the file tree from cwd, also reads ~/.moxxy/config.{ts,js,mjs}, merges by precedence, and resolves the final shape the CLI consumes.",
+  "description": "OpenAI LLMProvider plugin for moxxy. Streams Chat Completions with tool_calls; translates moxxy ProviderRequest/Event ↔ OpenAI wire shape.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -18,17 +18,17 @@
     "test": "vitest run",
     "clean": "rm -rf dist .turbo"
   },
+  "moxxy": { "plugin": { "entry": "./dist/index.js", "kind": "provider" } },
   "dependencies": {
     "@moxxy/sdk": "workspace:*",
-    "jiti": "^2.4.2",
-    "yaml": "^2.6.0",
-    "zod": "^3.24.0"
+    "openai": "^4.80.0"
   },
   "devDependencies": {
     "@moxxy/tsconfig": "workspace:*",
     "@moxxy/vitest-preset": "workspace:*",
     "@types/node": "^22.10.0",
     "typescript": "^5.7.3",
-    "vitest": "^2.1.8"
+    "vitest": "^2.1.8",
+    "zod": "^3.24.0"
   }
 }

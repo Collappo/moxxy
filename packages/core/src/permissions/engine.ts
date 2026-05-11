@@ -64,6 +64,32 @@ export class PermissionEngine {
     await this.persist();
   }
 
+  async addDeny(rule: PermissionRule & { name: string }): Promise<void> {
+    this.policy = {
+      ...this.policy,
+      deny: [...this.policy.deny, { name: rule.name, reason: rule.reason }],
+    };
+    await this.persist();
+  }
+
+  /** Remove every rule (allow + deny) whose name matches exactly. Returns the count removed. */
+  async removeByName(name: string): Promise<number> {
+    const allowBefore = this.policy.allow.length;
+    const denyBefore = this.policy.deny.length;
+    this.policy = {
+      allow: this.policy.allow.filter((r) => r.name !== name),
+      deny: this.policy.deny.filter((r) => r.name !== name),
+    };
+    const removed = allowBefore - this.policy.allow.length + (denyBefore - this.policy.deny.length);
+    if (removed > 0) await this.persist();
+    return removed;
+  }
+
+  async clear(): Promise<void> {
+    this.policy = { allow: [], deny: [] };
+    await this.persist();
+  }
+
   private async persist(): Promise<void> {
     if (!this.policyPath) return;
     await fs.mkdir(path.dirname(this.policyPath), { recursive: true });

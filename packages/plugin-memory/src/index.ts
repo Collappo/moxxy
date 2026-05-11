@@ -17,6 +17,14 @@ export { parseMdFile, parseFrontmatter, renderFrontmatter } from './parse.js';
 export { recentExchanges, summarizeSession, type SessionFact } from './stm.js';
 export { TfIdfEmbedder, cosineSimilarity, tokenize } from './tfidf.js';
 export { EmbeddingIndex } from './embedding-cache.js';
+export {
+  planConsolidation,
+  consolidateMemory,
+  buildMemoryConsolidatePlugin,
+  type ConsolidatePlan,
+  type ConsolidateOptions,
+  type ConsolidationOutcome,
+} from './consolidate.js';
 
 export interface BuildMemoryPluginOptions extends MemoryStoreOptions {}
 

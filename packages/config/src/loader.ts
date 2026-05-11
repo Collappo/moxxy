@@ -16,8 +16,22 @@ export interface LoadedConfig {
   readonly sources: ReadonlyArray<{ scope: 'project' | 'user' | 'explicit'; path: string }>;
 }
 
-const CONFIG_NAMES = ['moxxy.config.ts', 'moxxy.config.js', 'moxxy.config.mjs', 'moxxy.config.cjs'];
-const USER_CONFIG_NAMES = ['config.ts', 'config.js', 'config.mjs', 'config.cjs'];
+const CONFIG_NAMES = [
+  'moxxy.config.yaml',
+  'moxxy.config.yml',
+  'moxxy.config.ts',
+  'moxxy.config.js',
+  'moxxy.config.mjs',
+  'moxxy.config.cjs',
+];
+const USER_CONFIG_NAMES = [
+  'config.yaml',
+  'config.yml',
+  'config.ts',
+  'config.js',
+  'config.mjs',
+  'config.cjs',
+];
 
 export async function loadConfig(opts: LoadConfigOptions): Promise<LoadedConfig> {
   const sources: Array<{ scope: 'project' | 'user' | 'explicit'; path: string }> = [];
@@ -50,19 +64,29 @@ export async function loadConfig(opts: LoadConfigOptions): Promise<LoadedConfig>
 
 async function loadOne(filePath: string): Promise<MoxxyConfig> {
   const ext = path.extname(filePath);
-  let mod: unknown;
-  if (ext === '.ts' || ext === '.tsx') {
-    const jiti = await getJiti(path.dirname(filePath));
-    if (!jiti) throw new Error(`Cannot load ${filePath}: jiti is required for .ts configs.`);
-    mod = jiti(filePath);
+  let raw: unknown;
+
+  if (ext === '.yaml' || ext === '.yml') {
+    const yamlText = await fs.readFile(filePath, 'utf8');
+    const yamlMod = (await import('yaml')) as { parse: (text: string) => unknown };
+    raw = yamlMod.parse(yamlText);
+    if (raw === null || raw === undefined) raw = {};
   } else {
-    const url = `${pathToFileURL(filePath).href}?v=${Date.now()}`;
-    mod = await import(url);
+    let mod: unknown;
+    if (ext === '.ts' || ext === '.tsx') {
+      const jiti = await getJiti(path.dirname(filePath));
+      if (!jiti) throw new Error(`Cannot load ${filePath}: jiti is required for .ts configs.`);
+      mod = jiti(filePath);
+    } else {
+      const url = `${pathToFileURL(filePath).href}?v=${Date.now()}`;
+      mod = await import(url);
+    }
+    raw = extractDefault(mod);
+    if (!raw) {
+      throw new Error(`Config file ${filePath} must default-export the result of defineConfig().`);
+    }
   }
-  const raw = extractDefault(mod);
-  if (!raw) {
-    throw new Error(`Config file ${filePath} must default-export the result of defineConfig().`);
-  }
+
   const parsed = moxxyConfigSchema.safeParse(raw);
   if (!parsed.success) {
     throw new Error(
