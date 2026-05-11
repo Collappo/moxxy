@@ -21,6 +21,14 @@ import { toolUseLoopPlugin } from '@moxxy/loop-tool-use';
 import { planExecuteLoopPlugin } from '@moxxy/loop-plan-execute';
 import { summarizeCompactorPlugin } from '@moxxy/compactor-summarize';
 import { BUILTIN_SKILLS_DIR } from '@moxxy/skills-builtin';
+import {
+  buildVaultPlugin,
+  containsPlaceholder,
+  resolveValue,
+  type VaultStore,
+} from '@moxxy/plugin-vault';
+import { buildMemoryPlugin, type MemoryStore } from '@moxxy/plugin-memory';
+import { buildTelegramPlugin } from '@moxxy/plugin-telegram';
 
 export interface SetupOptions {
   readonly cwd: string;
@@ -30,12 +38,15 @@ export interface SetupOptions {
   readonly model?: string;
   readonly configPath?: string;
   readonly skipUserConfig?: boolean;
+  readonly disableKeytar?: boolean;
 }
 
 export interface SetupResult {
   readonly session: Session;
   readonly config: MoxxyConfig;
   readonly configSources: ReadonlyArray<{ scope: 'project' | 'user' | 'explicit'; path: string }>;
+  readonly vault: VaultStore;
+  readonly memory: MemoryStore;
 }
 
 export async function setupSession(opts: SetupOptions): Promise<Session> {
@@ -46,11 +57,23 @@ export async function setupSession(opts: SetupOptions): Promise<Session> {
 export async function setupSessionWithConfig(opts: SetupOptions): Promise<SetupResult> {
   const logger = opts.verbose ? createLogger({ minLevel: 'debug' }) : silentLogger;
 
-  const { config, sources } = await loadConfig({
+  const { config: rawConfig, sources } = await loadConfig({
     cwd: opts.cwd,
     explicitPath: opts.configPath,
     skipUser: opts.skipUserConfig,
   });
+
+  // Build vault + memory eagerly — both register tools we expose by default.
+  const { plugin: vaultPlugin, vault } = buildVaultPlugin({ disableKeytar: opts.disableKeytar });
+  const { plugin: memoryPlugin, store: memory } = buildMemoryPlugin({});
+
+  // If the config references ${vault:...} placeholders, resolve them now
+  // (this triggers the master-key prompt if the vault isn't yet open).
+  let config = rawConfig;
+  if (containsPlaceholder(rawConfig)) {
+    logger.info('resolving vault placeholders in config');
+    config = (await resolveValue(rawConfig, vault)) as MoxxyConfig;
+  }
 
   const userPolicyPath =
     config.permissions?.policyPath ?? path.join(os.homedir(), '.moxxy', 'permissions.json');
@@ -70,6 +93,9 @@ export async function setupSessionWithConfig(opts: SetupOptions): Promise<SetupR
     { name: '@moxxy/loop-tool-use', plugin: toolUseLoopPlugin },
     { name: '@moxxy/loop-plan-execute', plugin: planExecuteLoopPlugin },
     { name: '@moxxy/compactor-summarize', plugin: summarizeCompactorPlugin },
+    { name: '@moxxy/plugin-vault', plugin: vaultPlugin },
+    { name: '@moxxy/plugin-memory', plugin: memoryPlugin },
+    { name: '@moxxy/plugin-telegram', plugin: buildTelegramPlugin({ vault }) },
     { name: '@moxxy/synthesize-skill', plugin: buildSynthesizeSkillPlugin(session) },
   ];
 
@@ -102,7 +128,7 @@ export async function setupSessionWithConfig(opts: SetupOptions): Promise<SetupR
   });
   for (const skill of discovered) session.skills.register(skill);
 
-  return { session, config, configSources: sources };
+  return { session, config, configSources: sources, vault, memory };
 }
 
 export { createAllowListResolver, createCallbackResolver, denyByDefaultResolver };
