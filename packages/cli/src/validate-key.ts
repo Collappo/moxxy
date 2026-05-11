@@ -1,68 +1,28 @@
+import type { ProviderRegistry } from '@moxxy/core';
+import type { ProviderKeyValidation } from '@moxxy/sdk';
+
 /**
- * Lightweight "is this API key actually accepted by the provider" checks. Used
- * by the setup wizard to give users immediate feedback during key entry.
- *
- * Costs:
- *   - openai: free (lists model metadata; no inference)
- *   - anthropic: ~one input token; effectively free
+ * Registry-based key validation. Looks up the provider in the session's
+ * ProviderRegistry and delegates to its `validateKey` (if defined). The CLI
+ * has zero knowledge of provider internals — adding a new provider just
+ * means a new plugin whose defineProvider() sets `validateKey`.
  */
-
-export type ValidationResult = { ok: true } | { ok: false; message: string };
-
-export interface ValidateKeyDeps {
-  /** Inject SDK constructors for tests. Defaults to the real packages. */
-  readonly makeAnthropic?: (apiKey: string) => {
-    messages: { create: (args: Record<string, unknown>) => Promise<unknown> };
-  };
-  readonly makeOpenAI?: (apiKey: string) => {
-    models: { list: () => Promise<unknown> };
-  };
-}
-
 export async function validateProviderKey(
-  providerId: string,
+  providerName: string,
   key: string,
-  deps: ValidateKeyDeps = {},
-): Promise<ValidationResult> {
-  if (!key || key.trim().length < 8) {
-    return { ok: false, message: 'key looks too short' };
+  providers: { list(): ReadonlyArray<{ name: string; validateKey?: (key: string) => Promise<ProviderKeyValidation> }> },
+): Promise<ProviderKeyValidation> {
+  const def = providers.list().find((p) => p.name === providerName);
+  if (!def) {
+    return { ok: false, message: `unknown provider: ${providerName}` };
   }
-  try {
-    if (providerId === 'anthropic') {
-      const make = deps.makeAnthropic ?? (await defaultAnthropicFactory());
-      const client = make(key);
-      await client.messages.create({
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 1,
-        messages: [{ role: 'user', content: 'ping' }],
-      });
-      return { ok: true };
-    }
-    if (providerId === 'openai') {
-      const make = deps.makeOpenAI ?? (await defaultOpenAIFactory());
-      const client = make(key);
-      await client.models.list();
-      return { ok: true };
-    }
-    return { ok: false, message: `unknown provider: ${providerId}` };
-  } catch (err) {
+  if (!def.validateKey) {
     return {
       ok: false,
-      message: err instanceof Error ? err.message : String(err),
+      message: `provider '${providerName}' does not support key validation`,
     };
   }
+  return await def.validateKey(key);
 }
 
-async function defaultAnthropicFactory(): Promise<NonNullable<ValidateKeyDeps['makeAnthropic']>> {
-  const mod: unknown = await import('@anthropic-ai/sdk');
-  const Ctor = (mod as { default: new (opts: { apiKey: string }) => unknown }).default;
-  return (apiKey: string) =>
-    new Ctor({ apiKey }) as unknown as ReturnType<NonNullable<ValidateKeyDeps['makeAnthropic']>>;
-}
-
-async function defaultOpenAIFactory(): Promise<NonNullable<ValidateKeyDeps['makeOpenAI']>> {
-  const mod: unknown = await import('openai');
-  const Ctor = (mod as { default: new (opts: { apiKey: string }) => unknown }).default;
-  return (apiKey: string) =>
-    new Ctor({ apiKey }) as unknown as ReturnType<NonNullable<ValidateKeyDeps['makeOpenAI']>>;
-}
+export type { ProviderRegistry };

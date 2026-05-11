@@ -9,6 +9,7 @@ import { runChannelsCommand } from './commands/channels.js';
 import { runChannelByName } from './commands/run-channel.js';
 import { runInitCommand } from './commands/init.js';
 import { runPermsCommand } from './commands/perms.js';
+import { runMemoryCommand } from './commands/memory.js';
 import { setupSessionWithConfig } from './setup.js';
 
 const KNOWN_COMMANDS = new Set([
@@ -22,6 +23,7 @@ const KNOWN_COMMANDS = new Set([
   'telegram',
   'init',
   'perms',
+  'memory',
 ]);
 
 const HELP = `moxxy — block-based agentic loop
@@ -44,6 +46,7 @@ usage:
   moxxy skills list|new <name>       manage skill files
   moxxy plugins list|reload          manage plugin host
   moxxy perms list|allow|deny|remove|clear|path  view/edit the permission policy
+  moxxy memory list|audit|show|revert|prune-stale|path  curate long-term memory
   moxxy --help                       this help
   moxxy --version                    print version
 
@@ -72,6 +75,8 @@ async function main(): Promise<number> {
       return await runInitCommand(argv);
     case 'perms':
       return await runPermsCommand(argv);
+    case 'memory':
+      return await runMemoryCommand(argv);
     case 'prompt':
       return await runPromptCommand(argv);
     case 'tui':

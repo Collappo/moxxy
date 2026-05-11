@@ -1,9 +1,7 @@
 import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
-import { anthropicModels } from '@moxxy/plugin-provider-anthropic';
-import { openAIModels } from '@moxxy/plugin-provider-openai';
 import { setupSessionWithConfig } from '../setup.js';
-import { PROVIDER_KEYS } from '../provider-keys.js';
+import { canonicalKey } from '../provider-keys.js';
 import { validateProviderKey } from '../validate-key.js';
 import type { ParsedArgv } from '../argv.js';
 
@@ -12,19 +10,21 @@ import type { ParsedArgv } from '../argv.js';
  * the user through provider selection, API-key entry, model + loop + embedder
  * picks, and emits a moxxy.config.yaml.
  *
+ * Everything provider-specific is driven by the session's ProviderRegistry —
+ * the CLI itself doesn't know about Anthropic or OpenAI by name. New providers
+ * appear in the wizard automatically as long as their plugin is loaded.
+ *
  * If stdin isn't a TTY, falls back to a minimal headless flow that just
  * forwards env vars into the vault.
  */
 export async function runInitCommand(_argv: ParsedArgv): Promise<number> {
-  // Boot the session up front so the vault is unlocked once (keychain or
-  // passphrase) before we start prompting for keys.
-  const { vault } = await setupSessionWithConfig({
+  const { session, vault } = await setupSessionWithConfig({
     cwd: process.cwd(),
     skipKeyPrompt: true,
   });
 
   if (!process.stdin.isTTY) {
-    return await runHeadlessInit(vault);
+    return await runHeadlessInit(session, vault);
   }
 
   const [React, { render }, plugin] = await Promise.all([
@@ -34,15 +34,15 @@ export async function runInitCommand(_argv: ParsedArgv): Promise<number> {
   ]);
   const { SetupWizard } = plugin;
 
-  const providers = [
-    { id: 'anthropic', label: 'Anthropic', description: 'Claude — Sonnet / Opus / Haiku' },
-    { id: 'openai', label: 'OpenAI', description: 'GPT-4o / 4o-mini / 4-turbo' },
-  ];
-
-  const models = {
-    anthropic: anthropicModels.map((m) => ({ id: m.id, label: m.id })),
-    openai: openAIModels.map((m) => ({ id: m.id, label: m.id })),
-  };
+  const providerDefs = session.providers.list();
+  const providers = providerDefs.map((p) => ({
+    id: p.name,
+    label: titleCase(p.name),
+    description: p.models[0]?.id ? `default model: ${p.models[0].id}` : undefined,
+  }));
+  const models = Object.fromEntries(
+    providerDefs.map((p) => [p.name, p.models.map((m) => ({ id: m.id, label: m.id }))]),
+  );
 
   const loops = [
     { id: 'tool-use', label: 'tool-use', description: 'Default Claude Code-style loop (recommended)' },
@@ -60,9 +60,7 @@ export async function runInitCommand(_argv: ParsedArgv): Promise<number> {
 
   const controller = {
     async saveApiKey(providerId: string, key: string): Promise<void> {
-      const canonical = PROVIDER_KEYS[providerId];
-      if (!canonical) throw new Error(`unknown provider: ${providerId}`);
-      await vault.set(canonical, key, [providerId]);
+      await vault.set(canonicalKey(providerId), key, [providerId]);
     },
     async writeConfig(yaml: string): Promise<string> {
       await fs.mkdir(path.dirname(target), { recursive: true });
@@ -73,7 +71,7 @@ export async function runInitCommand(_argv: ParsedArgv): Promise<number> {
       providerId: string,
       key: string,
     ): Promise<{ ok: true } | { ok: false; message: string }> {
-      return await validateProviderKey(providerId, key);
+      return await validateProviderKey(providerId, key, session.providers);
     },
   };
 
@@ -93,16 +91,20 @@ export async function runInitCommand(_argv: ParsedArgv): Promise<number> {
   return 0;
 }
 
-async function runHeadlessInit(vault: import('@moxxy/plugin-vault').VaultStore): Promise<number> {
+async function runHeadlessInit(
+  session: import('@moxxy/core').Session,
+  vault: import('@moxxy/plugin-vault').VaultStore,
+): Promise<number> {
   process.stderr.write('moxxy init: no TTY — running headless. Reading provider keys from env.\n');
   let saved = 0;
-  for (const [provider, canonical] of Object.entries(PROVIDER_KEYS)) {
+  for (const provider of session.providers.list()) {
+    const canonical = canonicalKey(provider.name);
     const value = process.env[canonical];
     if (!value) continue;
     try {
       const existing = await vault.get(canonical);
       if (existing) continue;
-      await vault.set(canonical, value, [provider]);
+      await vault.set(canonical, value, [provider.name]);
       saved += 1;
     } catch {
       // skip
@@ -110,4 +112,8 @@ async function runHeadlessInit(vault: import('@moxxy/plugin-vault').VaultStore):
   }
   process.stderr.write(`moxxy init: saved ${saved} key(s) to vault.\n`);
   return 0;
+}
+
+function titleCase(s: string): string {
+  return s.charAt(0).toUpperCase() + s.slice(1);
 }

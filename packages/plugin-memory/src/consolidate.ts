@@ -211,13 +211,41 @@ function extractJson(text: string): unknown {
   return JSON.parse(candidate.slice(start, end + 1));
 }
 
+export interface BuildMemoryConsolidateOptions {
+  /**
+   * When memory.list().length crosses this number, the plugin appends a hint
+   * to the next provider request's system prompt nudging the agent to call
+   * `memory_consolidate`. Default: 30. Set to 0 to disable the nudge.
+   */
+  readonly autoNudgeThreshold?: number;
+}
+
 export function buildMemoryConsolidatePlugin(
   store: MemoryStore,
   getProvider: () => LLMProvider,
+  opts: BuildMemoryConsolidateOptions = {},
 ): Plugin {
+  const threshold = opts.autoNudgeThreshold ?? 30;
+  let nudged = false;
+
   return definePlugin({
     name: '@moxxy/memory-consolidate',
     version: '0.0.0',
+    hooks:
+      threshold > 0
+        ? {
+            onBeforeProviderCall: async (req) => {
+              if (nudged) return; // one nudge per session
+              const count = (await store.list()).length;
+              if (count <= threshold) return;
+              nudged = true;
+              const hint =
+                `\n\n[memory note] long-term memory has ${count} entries (threshold: ${threshold}). ` +
+                `consider running \`memory_consolidate\` when there's a natural break to merge overlapping entries.`;
+              return { ...req, system: (req.system ?? '') + hint };
+            },
+          }
+        : {},
     tools: [
       defineTool({
         name: 'memory_consolidate',

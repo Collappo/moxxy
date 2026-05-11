@@ -80,12 +80,12 @@ describe('resolveProviderApiKey', () => {
     expect(await vault.get('ANTHROPIC_API_KEY')).toBeNull();
   });
 
-  it('handles unknown provider names by returning config as-is', async () => {
+  it('derives the canonical key name for any provider', async () => {
     const out = await resolveProviderApiKey('vendor-z', vault, {
       providerConfig: { apiKey: 'hi' },
     });
     expect(out.source).toBe('config');
-    expect(out.canonicalName).toBeNull();
+    expect(out.canonicalName).toBe('VENDOR-Z_API_KEY');
   });
 
   it('OPENAI_API_KEY resolves analogously for the openai provider', async () => {

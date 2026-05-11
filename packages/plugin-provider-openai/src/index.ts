@@ -4,11 +4,15 @@ import { OpenAIProvider, openAIModels, type OpenAIProviderConfig } from './provi
 export { OpenAIProvider, openAIModels };
 export type { OpenAIProviderConfig };
 export { toOpenAIMessages, toOpenAITools } from './translate.js';
+export { validateKey, type ValidateKeyDeps, type ValidationResult } from './validate.js';
+
+import { validateKey as validateOpenAIKey } from './validate.js';
 
 export const openaiProviderDef = defineProvider({
   name: 'openai',
   models: [...openAIModels],
   createClient: (config) => new OpenAIProvider(config as OpenAIProviderConfig),
+  validateKey: (key) => validateOpenAIKey(key),
 });
 
 export const openaiPlugin = definePlugin({

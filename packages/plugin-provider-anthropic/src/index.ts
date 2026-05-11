@@ -4,11 +4,15 @@ import { AnthropicProvider, anthropicModels, type AnthropicProviderConfig } from
 export { AnthropicProvider, anthropicModels };
 export type { AnthropicProviderConfig };
 export { toAnthropicMessages, toAnthropicTools } from './translate.js';
+export { validateKey, type ValidateKeyDeps, type ValidationResult } from './validate.js';
+
+import { validateKey as validateAnthropicKey } from './validate.js';
 
 export const anthropicProviderDef = defineProvider({
   name: 'anthropic',
   models: [...anthropicModels],
   createClient: (config) => new AnthropicProvider(config as AnthropicProviderConfig),
+  validateKey: (key) => validateAnthropicKey(key),
 });
 
 export const anthropicPlugin = definePlugin({

@@ -52,8 +52,18 @@ export interface LLMProvider {
   countTokens(req: Pick<ProviderRequest, 'model' | 'messages' | 'system' | 'tools'>): Promise<number>;
 }
 
+export type ProviderKeyValidation =
+  | { readonly ok: true }
+  | { readonly ok: false; readonly message: string };
+
 export interface ProviderDef {
   readonly name: string;
   readonly models: ReadonlyArray<ModelDescriptor>;
   createClient(config: Record<string, unknown>): LLMProvider;
+  /**
+   * Optional check that the given key is actually accepted by the vendor.
+   * Implementations should be cheap (a free metadata call or a 1-token
+   * completion). Used by `moxxy init` to verify keys before persisting.
+   */
+  validateKey?(apiKey: string): Promise<ProviderKeyValidation>;
 }

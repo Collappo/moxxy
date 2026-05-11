@@ -58,6 +58,7 @@ export type {
   ModelDescriptor,
   LLMProvider,
   ProviderDef,
+  ProviderKeyValidation,
 } from './provider.js';
 
 export type { TokenBudget, CompactContext, CompactorDef } from './compactor.js';

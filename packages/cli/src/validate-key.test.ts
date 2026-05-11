@@ -1,69 +1,56 @@
 import { describe, expect, it, vi } from 'vitest';
 import { validateProviderKey } from './validate-key.js';
 
-describe('validateProviderKey', () => {
-  it('rejects empty / too-short keys before any network call', async () => {
-    const res = await validateProviderKey('anthropic', '');
-    expect(res).toEqual({ ok: false, message: 'key looks too short' });
+function makeRegistry(
+  defs: Array<{
+    name: string;
+    validateKey?: (k: string) => Promise<{ ok: true } | { ok: false; message: string }>;
+  }>,
+): { list: () => typeof defs } {
+  return { list: () => defs };
+}
 
-    const tiny = await validateProviderKey('openai', 'abc');
-    expect(tiny.ok).toBe(false);
-  });
-
-  it('anthropic: success path hits messages.create', async () => {
-    const create = vi.fn().mockResolvedValue({});
-    const make = vi.fn().mockReturnValue({ messages: { create } });
-    const res = await validateProviderKey('anthropic', 'sk-ant-very-long-test-key', {
-      makeAnthropic: make,
-    });
+describe('validateProviderKey (registry-based dispatch)', () => {
+  it('delegates to the matching provider def', async () => {
+    const validateKey = vi.fn().mockResolvedValue({ ok: true });
+    const registry = makeRegistry([{ name: 'foo', validateKey }]);
+    const res = await validateProviderKey('foo', 'a-long-enough-key', registry);
     expect(res).toEqual({ ok: true });
-    expect(make).toHaveBeenCalledWith('sk-ant-very-long-test-key');
-    expect(create).toHaveBeenCalledOnce();
+    expect(validateKey).toHaveBeenCalledWith('a-long-enough-key');
   });
 
-  it('anthropic: SDK throw → ok:false with the underlying message', async () => {
-    const make = () => ({
-      messages: {
-        create: async () => {
-          throw new Error('401 invalid api key');
-        },
-      },
-    });
-    const res = await validateProviderKey('anthropic', 'sk-ant-bad-but-long-enough', {
-      makeAnthropic: make,
-    });
-    expect(res.ok).toBe(false);
-    if (!res.ok) expect(res.message).toContain('401');
-  });
-
-  it('openai: success path lists models', async () => {
-    const list = vi.fn().mockResolvedValue({ data: [] });
-    const make = vi.fn().mockReturnValue({ models: { list } });
-    const res = await validateProviderKey('openai', 'sk-very-long-test-key', {
-      makeOpenAI: make,
-    });
-    expect(res).toEqual({ ok: true });
-    expect(list).toHaveBeenCalledOnce();
-  });
-
-  it('openai: SDK throw → ok:false with the underlying message', async () => {
-    const make = () => ({
-      models: {
-        list: async () => {
-          throw new Error('Incorrect API key provided');
-        },
-      },
-    });
-    const res = await validateProviderKey('openai', 'sk-bad-but-long-enough', {
-      makeOpenAI: make,
-    });
-    expect(res.ok).toBe(false);
-    if (!res.ok) expect(res.message).toContain('Incorrect API key');
-  });
-
-  it('unknown provider returns a clear error', async () => {
-    const res = await validateProviderKey('vendor-z', 'long-enough-key-here');
+  it('returns "unknown provider" when no def matches', async () => {
+    const registry = makeRegistry([]);
+    const res = await validateProviderKey('absent', 'key', registry);
     expect(res.ok).toBe(false);
     if (!res.ok) expect(res.message).toContain('unknown provider');
+  });
+
+  it('returns a clear error when the def has no validateKey', async () => {
+    const registry = makeRegistry([{ name: 'cant-validate' }]);
+    const res = await validateProviderKey('cant-validate', 'key', registry);
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.message).toContain('does not support key validation');
+  });
+
+  it("propagates the provider def's error message", async () => {
+    const validateKey = vi.fn().mockResolvedValue({ ok: false, message: 'forbidden' });
+    const registry = makeRegistry([{ name: 'bar', validateKey }]);
+    const res = await validateProviderKey('bar', 'key', registry);
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.message).toBe('forbidden');
+  });
+
+  it('works with the real session.providers registry shape', async () => {
+    const registry = {
+      list: () => [
+        {
+          name: 'real-provider',
+          validateKey: async () => ({ ok: true as const }),
+        },
+      ],
+    };
+    const res = await validateProviderKey('real-provider', 'key', registry);
+    expect(res.ok).toBe(true);
   });
 });
