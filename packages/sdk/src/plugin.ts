@@ -1,10 +1,11 @@
+import type { ChannelDef } from './channel.js';
 import type { CompactorDef } from './compactor.js';
 import type { LifecycleHooks } from './hooks.js';
 import type { LoopStrategyDef } from './loop.js';
 import type { ProviderDef } from './provider.js';
 import type { ToolDef } from './tool.js';
 
-export type PluginKind = 'tools' | 'provider' | 'loop' | 'compactor' | 'mcp' | 'cli' | 'hooks';
+export type PluginKind = 'tools' | 'provider' | 'loop' | 'compactor' | 'mcp' | 'cli' | 'channel' | 'hooks';
 
 export interface PluginSpec {
   readonly name: string;
@@ -14,6 +15,7 @@ export interface PluginSpec {
   readonly providers?: ReadonlyArray<ProviderDef>;
   readonly loopStrategies?: ReadonlyArray<LoopStrategyDef>;
   readonly compactors?: ReadonlyArray<CompactorDef>;
+  readonly channels?: ReadonlyArray<ChannelDef>;
   readonly hooks?: LifecycleHooks;
   readonly skillsDir?: string;
 }

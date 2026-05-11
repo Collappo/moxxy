@@ -91,7 +91,14 @@ export type {
   ResolvedPluginManifest,
 } from './plugin.js';
 
-export type { Channel, ChannelHandle, ChannelStartOptsBase } from './channel.js';
+export type {
+  Channel,
+  ChannelHandle,
+  ChannelStartOptsBase,
+  ChannelFactoryDeps,
+  ChannelDef,
+  ChannelRegistry,
+} from './channel.js';
 export type { EmbeddingProvider } from './embedding.js';
 
 export interface PluginLoader {
@@ -104,6 +111,7 @@ export {
   defineProvider,
   defineLoopStrategy,
   defineCompactor,
+  defineChannel,
   definePermission,
   defineSkill,
 } from './define.js';

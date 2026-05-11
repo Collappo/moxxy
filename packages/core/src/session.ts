@@ -6,6 +6,7 @@ import { PluginHost } from './plugins/host.js';
 import { ProviderRegistry } from './registries/providers.js';
 import { LoopRegistry } from './registries/loops.js';
 import { CompactorRegistry } from './registries/compactors.js';
+import { ChannelRegistryImpl } from './registries/channels.js';
 import { SkillRegistryImpl } from './registries/skills.js';
 import { ToolRegistryImpl, type ToolRegistry } from './registries/tools.js';
 import { PermissionEngine } from './permissions/engine.js';
@@ -32,6 +33,7 @@ export class Session {
   readonly providers: ProviderRegistry;
   readonly loops: LoopRegistry;
   readonly compactors: CompactorRegistry;
+  readonly channels: ChannelRegistryImpl;
   readonly skills: SkillRegistryImpl;
   readonly permissions: PermissionEngine;
   readonly resolver: PermissionResolver;
@@ -48,6 +50,7 @@ export class Session {
     this.providers = new ProviderRegistry();
     this.loops = new LoopRegistry();
     this.compactors = new CompactorRegistry();
+    this.channels = new ChannelRegistryImpl();
     this.skills = new SkillRegistryImpl();
     this.permissions = opts.permissionEngine ?? new PermissionEngine();
     this.resolver = opts.permissionResolver ?? autoAllowResolver;
@@ -62,6 +65,7 @@ export class Session {
       providers: this.providers,
       loops: this.loops,
       compactors: this.compactors,
+      channels: this.channels,
       dispatcher: this.dispatcher,
     });
   }

@@ -1,5 +1,6 @@
 import type {
   AppContext,
+  ChannelDef,
   CompactorDef,
   LifecycleHooks,
   LoopStrategyDef,
@@ -10,6 +11,7 @@ import type {
   ToolDef,
 } from '@moxxy/sdk';
 import type { Logger } from '../logger.js';
+import type { ChannelRegistryImpl } from '../registries/channels.js';
 import type { CompactorRegistry } from '../registries/compactors.js';
 import type { LoopRegistry } from '../registries/loops.js';
 import type { ProviderRegistry } from '../registries/providers.js';
@@ -24,6 +26,7 @@ export interface PluginHostOptions {
   readonly providers: ProviderRegistry;
   readonly loops: LoopRegistry;
   readonly compactors: CompactorRegistry;
+  readonly channels: ChannelRegistryImpl;
   readonly dispatcher: HookDispatcherImpl;
   readonly loader?: PluginLoader;
 }
@@ -39,6 +42,7 @@ interface LoadedRecord {
   readonly providerNames: ReadonlyArray<string>;
   readonly loopNames: ReadonlyArray<string>;
   readonly compactorNames: ReadonlyArray<string>;
+  readonly channelNames: ReadonlyArray<string>;
 }
 
 export interface PluginRegistrationEvent {
@@ -116,6 +120,7 @@ export class PluginHost implements PluginHostHandle {
     for (const provName of record.providerNames) this.opts.providers.unregister(provName);
     for (const loopName of record.loopNames) this.opts.loops.unregister(loopName);
     for (const compName of record.compactorNames) this.opts.compactors.unregister(compName);
+    for (const channelName of record.channelNames) this.opts.channels.unregister(channelName);
     this.loaded.delete(name);
     this.refreshDispatcher();
     this.emit({ kind: 'unregistered', plugin: record.plugin, manifest: record.manifest });
@@ -146,13 +151,15 @@ export class PluginHost implements PluginHostHandle {
     const providerNames = (plugin.providers ?? []).map((p: ProviderDef) => p.name);
     const loopNames = (plugin.loopStrategies ?? []).map((l: LoopStrategyDef) => l.name);
     const compactorNames = (plugin.compactors ?? []).map((c: CompactorDef) => c.name);
+    const channelNames = (plugin.channels ?? []).map((c: ChannelDef) => c.name);
 
     for (const tool of plugin.tools ?? []) this.opts.tools.register(tool);
     for (const provider of plugin.providers ?? []) this.opts.providers.register(provider);
     for (const loop of plugin.loopStrategies ?? []) this.opts.loops.register(loop);
     for (const compactor of plugin.compactors ?? []) this.opts.compactors.register(compactor);
+    for (const channel of plugin.channels ?? []) this.opts.channels.register(channel);
 
-    return { plugin, manifest, toolNames, providerNames, loopNames, compactorNames };
+    return { plugin, manifest, toolNames, providerNames, loopNames, compactorNames, channelNames };
   }
 
   private refreshDispatcher(): void {

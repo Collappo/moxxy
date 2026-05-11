@@ -1,3 +1,4 @@
+import type { Channel, ChannelDef, ChannelFactoryDeps } from './channel.js';
 import type { CompactorDef } from './compactor.js';
 import type { LoopStrategyDef } from './loop.js';
 import type { PermissionRule } from './permission.js';
@@ -44,6 +45,14 @@ export function defineLoopStrategy(spec: LoopStrategyDef): LoopStrategyDef {
 }
 
 export function defineCompactor(spec: CompactorDef): CompactorDef {
+  return Object.freeze(spec);
+}
+
+export function defineChannel<TStartOpts = unknown>(spec: {
+  name: string;
+  description: string;
+  create: (deps: ChannelFactoryDeps) => Channel<TStartOpts>;
+}): ChannelDef<TStartOpts> {
   return Object.freeze(spec);
 }
 

@@ -1,5 +1,6 @@
-import { defineTool, definePlugin, z, type Plugin } from '@moxxy/sdk';
+import { defineChannel, defineTool, definePlugin, z, type Plugin } from '@moxxy/sdk';
 import type { VaultStore } from '@moxxy/plugin-vault';
+import { TelegramChannel } from './channel.js';
 
 export {
   TelegramChannel,
@@ -31,6 +32,18 @@ export function buildTelegramPlugin(opts: BuildTelegramPluginOptions): Plugin {
   return definePlugin({
     name: '@moxxy/plugin-telegram',
     version: '0.0.0',
+    channels: [
+      defineChannel({
+        name: 'telegram',
+        description: 'Telegram bot channel via grammy. TOFU + code-pairing authorization.',
+        create: (deps) =>
+          new TelegramChannel({
+            vault: opts.vault,
+            token: (deps.options?.['token'] as string | undefined) ?? undefined,
+            logger: deps.logger as never,
+          }),
+      }),
+    ],
     tools: [
       defineTool({
         name: 'telegram_set_token',

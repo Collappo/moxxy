@@ -35,6 +35,7 @@ export { ToolRegistryImpl, type ToolRegistry } from './registries/tools.js';
 export { ProviderRegistry } from './registries/providers.js';
 export { LoopRegistry } from './registries/loops.js';
 export { CompactorRegistry } from './registries/compactors.js';
+export { ChannelRegistryImpl } from './registries/channels.js';
 export { PluginHost, type PluginLoader, type PluginRegistrationEvent } from './plugins/host.js';
 export { HookDispatcherImpl } from './plugins/lifecycle.js';
 export { discoverPlugins } from './plugins/discovery.js';

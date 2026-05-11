@@ -29,6 +29,7 @@ import {
 } from '@moxxy/plugin-vault';
 import { buildMemoryPlugin, type MemoryStore } from '@moxxy/plugin-memory';
 import { buildTelegramPlugin } from '@moxxy/plugin-telegram';
+import { cliPlugin } from '@moxxy/plugin-cli';
 
 export interface SetupOptions {
   readonly cwd: string;
@@ -95,6 +96,7 @@ export async function setupSessionWithConfig(opts: SetupOptions): Promise<SetupR
     { name: '@moxxy/compactor-summarize', plugin: summarizeCompactorPlugin },
     { name: '@moxxy/plugin-vault', plugin: vaultPlugin },
     { name: '@moxxy/plugin-memory', plugin: memoryPlugin },
+    { name: '@moxxy/plugin-cli', plugin: cliPlugin },
     { name: '@moxxy/plugin-telegram', plugin: buildTelegramPlugin({ vault }) },
     { name: '@moxxy/synthesize-skill', plugin: buildSynthesizeSkillPlugin(session) },
   ];
