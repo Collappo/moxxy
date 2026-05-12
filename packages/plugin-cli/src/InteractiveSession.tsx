@@ -302,14 +302,28 @@ export const InteractiveSession: React.FC<InteractiveSessionProps> = ({
     if (kind === 'model') {
       const [providerId, modelId] = id.split('::');
       if (!providerId || !modelId) return;
+      // If the provider wasn't in the boot probe's ready set, switching
+      // would surface a credential error on the next turn. Intercept
+      // here and surface the right configuration command instead.
+      const ready =
+        (session as unknown as { readyProviders?: Set<string> }).readyProviders ?? new Set<string>();
+      if (!ready.has(providerId)) {
+        const cmd =
+          providerId === 'openai-codex'
+            ? 'moxxy login openai-codex'
+            : `moxxy init   # (will prompt for ${providerId.toUpperCase()}_API_KEY)`;
+        setSystemNotice(
+          `${providerId} isn't connected. Run \`${cmd}\` then restart moxxy.\n` +
+            `Alternatively set the ${providerId.toUpperCase()}_API_KEY env var before launching.`,
+        );
+        return;
+      }
       try {
         if (providerId !== providerName) {
           session.providers.setActive(providerId);
         }
         setActiveModelOverride(modelId);
         setSystemNotice(`switched to ${providerId}:${modelId}`);
-        // Persist so this choice survives across CLI invocations. Failure
-        // to write is non-fatal: the pick still applies this session.
         void savePreferences({ providerName: providerId, model: modelId });
       } catch (err) {
         setSystemNotice(
@@ -386,14 +400,19 @@ export const InteractiveSession: React.FC<InteractiveSessionProps> = ({
       case '/model': {
         // Build a flat list of all (provider, model) pairs across every
         // registered provider — the user can switch BOTH provider and
-        // model in one pick. Grouping is by provider name.
+        // model in one pick. Grouping is by provider name. Providers
+        // that didn't pass credential probing at boot are tagged
+        // "not connected" so the user knows they need setup first.
         const providers = session.providers.list();
         if (providers.length === 0) {
           setSystemNotice('no providers registered');
           return;
         }
+        const ready =
+          (session as unknown as { readyProviders?: Set<string> }).readyProviders ?? new Set<string>();
         const options: ListPickerOption[] = [];
         for (const p of providers) {
+          const isReady = ready.has(p.name);
           for (const m of p.models) {
             options.push({
               id: `${p.name}::${m.id}`,
@@ -401,6 +420,7 @@ export const InteractiveSession: React.FC<InteractiveSessionProps> = ({
               group: p.name,
               current: providerName === p.name && activeModel === m.id,
               description: m.contextWindow ? `${formatTokensShort(m.contextWindow)} ctx` : undefined,
+              ...(isReady ? {} : { badge: 'not connected', badgeColor: 'red' as const }),
             });
           }
         }

@@ -286,6 +286,23 @@ export async function setupSessionWithConfig(opts: SetupOptions): Promise<SetupR
     }
   }
 
+  // Probe each registered provider for credential readiness so the TUI
+  // /model picker can flag unconfigured ones. Non-interactive — silent
+  // failures leave the provider out of the ready set. The currently
+  // activated provider is auto-included.
+  const readyProviders = new Set<string>();
+  if (activated) readyProviders.add(activated.name);
+  for (const p of session.providers.list()) {
+    if (readyProviders.has(p.name)) continue;
+    try {
+      await resolveProviderCredentials(p.name, vault, { interactive: false });
+      readyProviders.add(p.name);
+    } catch {
+      // not ready — leave out
+    }
+  }
+  (session as unknown as { readyProviders: Set<string> }).readyProviders = readyProviders;
+
   if (config.loop) {
     session.loops.setActive(config.loop);
   }

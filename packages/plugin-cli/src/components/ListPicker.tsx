@@ -7,6 +7,12 @@ export interface ListPickerOption {
   readonly description?: string;
   readonly group?: string;
   readonly current?: boolean;
+  /**
+   * When set, renders as a small colored tag after the label
+   * (e.g. "not connected"). Use `badgeColor` to override the default.
+   */
+  readonly badge?: string;
+  readonly badgeColor?: 'red' | 'yellow' | 'green' | 'gray' | 'cyan';
 }
 
 export interface ListPickerProps {
@@ -74,6 +80,9 @@ export const ListPicker: React.FC<ListPickerProps> = ({ title, options, onSelect
                 <Text color={focused ? 'cyan' : undefined}>{focused ? '› ' : '  '}</Text>
                 <Text color={focused ? 'cyan' : undefined}>{opt.label}</Text>
                 {opt.current ? <Text color="green">{' (current)'}</Text> : null}
+                {opt.badge ? (
+                  <Text color={opt.badgeColor ?? 'red'}>{`  [${opt.badge}]`}</Text>
+                ) : null}
                 {opt.description ? (
                   <Text dimColor>{`  — ${opt.description}`}</Text>
                 ) : null}
