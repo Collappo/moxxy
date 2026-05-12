@@ -75,11 +75,8 @@ export const InteractiveSession: React.FC<InteractiveSessionProps> = ({
       return '(none)';
     }
   })();
-  const allTools = session.tools.list();
-  const allSkills = session.skills.list();
-  const PREVIEW_LIMIT = 6;
-  const toolPreview = allTools.slice(0, PREVIEW_LIMIT).map((t) => t.name);
-  const skillPreview = allSkills.slice(0, PREVIEW_LIMIT).map((s) => s.frontmatter.name);
+  const toolCount = session.tools.list().length;
+  const skillCount = session.skills.list().length;
   const pluginCount = session.pluginHost.list().length;
 
   const runSlash = (cmd: string): void => {
@@ -151,13 +148,9 @@ export const InteractiveSession: React.FC<InteractiveSessionProps> = ({
     <Box flexDirection="column">
       <Logo />
       <SessionInfo
-        provider={providerName}
-        model={activeModel}
         loop={loopName}
-        toolCount={allTools.length}
-        toolPreview={toolPreview}
-        skillCount={allSkills.length}
-        skillPreview={skillPreview}
+        toolCount={toolCount}
+        skillCount={skillCount}
         pluginCount={pluginCount}
       />
       <Box marginBottom={1}>
@@ -193,7 +186,7 @@ export const InteractiveSession: React.FC<InteractiveSessionProps> = ({
           placeholder={busy ? '' : 'type a prompt or / for commands'}
         />
       )}
-      <StatusBar />
+      <StatusBar provider={providerName} model={activeModel} busy={busy} />
     </Box>
   );
 };

@@ -1,17 +1,23 @@
 import React from 'react';
-import { Box } from 'ink';
+import { Box, Text } from 'ink';
 
 export interface StatusBarProps {
-  // Intentionally empty for now — the model/provider info moved up next to
-  // the logo so the row below the prompt stays visually quiet and reserved
-  // for future contextual content (token usage, network status, hints, etc.).
-  readonly _placeholder?: never;
+  readonly provider: string;
+  readonly model: string;
+  readonly busy?: boolean;
 }
 
 /**
- * Reserved space below the prompt input. The model + provider info now
- * lives below the logo at the top of the TUI. This component is kept as
- * the slot future indicators can fill (e.g., token counter, vault status,
- * stream rate) without re-shuffling the layout.
+ * Row below the prompt input. Shows the active provider (as a colored
+ * chip) and the model name. Lives here rather than in the SessionInfo
+ * table because provider+model are what the user actively cares about
+ * during a conversation — easier to glance at next to the prompt cursor
+ * than five lines up next to the static session shape.
  */
-export const StatusBar: React.FC<StatusBarProps> = () => <Box marginTop={1} />;
+export const StatusBar: React.FC<StatusBarProps> = ({ provider, model, busy }) => (
+  <Box marginTop={1}>
+    <Text dimColor>{busy ? '⏺  ' : '○  '}</Text>
+    <Text backgroundColor="magenta" color="white" bold>{` ${provider} `}</Text>
+    <Text dimColor>{`  ${model}`}</Text>
+  </Box>
+);
