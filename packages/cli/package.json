@@ -26,6 +26,7 @@
     "@moxxy/plugin-cli": "workspace:*",
     "@moxxy/plugin-embeddings-openai": "workspace:*",
     "@moxxy/plugin-embeddings-transformers": "workspace:*",
+    "@moxxy/plugin-mcp": "workspace:*",
     "@moxxy/plugin-memory": "workspace:*",
     "@moxxy/plugin-provider-anthropic": "workspace:*",
     "@moxxy/plugin-provider-openai": "workspace:*",

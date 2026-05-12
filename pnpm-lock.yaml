@@ -207,6 +207,9 @@ importers:
       '@moxxy/plugin-embeddings-transformers':
         specifier: workspace:*
         version: link:../plugin-embeddings-transformers
+      '@moxxy/plugin-mcp':
+        specifier: workspace:*
+        version: link:../plugin-mcp
       '@moxxy/plugin-memory':
         specifier: workspace:*
         version: link:../plugin-memory

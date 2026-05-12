@@ -14,6 +14,13 @@ export type {
 } from './types.js';
 export { wrapMcpServerTools } from './wrap.js';
 export { defaultToolNamePrefix } from './types.js';
+export {
+  buildMcpAdminPlugin,
+  mcpConfigPath,
+  readMcpConfig,
+  writeMcpConfig,
+  type McpStoredConfig,
+} from './admin.js';
 
 export interface CreateMcpPluginOptions extends McpPluginOptions {
   /**
@@ -51,9 +58,9 @@ export async function createMcpPlugin(opts: CreateMcpPluginOptions): Promise<Plu
   });
 }
 
-async function defaultClientFactory(
+export async function defaultClientFactory(
   server: McpServerConfig,
-  options: McpPluginOptions,
+  options: McpPluginOptions = { servers: [] },
 ): Promise<McpClientLike> {
   const { Client } = (await import('@modelcontextprotocol/sdk/client/index.js')) as {
     Client: new (info: { name: string; version: string }, capabilities: { capabilities: Record<string, unknown> }) => McpClientUntyped;
@@ -101,13 +108,22 @@ async function createTransport(server: McpServerConfig): Promise<unknown> {
         args?: string[];
         env?: Record<string, string>;
         cwd?: string;
+        stderr?: 'inherit' | 'pipe' | 'ignore' | 'overlapped' | number;
       }) => unknown;
     };
+    // Set stderr to 'ignore' so spawned subprocesses (mcp-remote, etc.)
+    // don't dump their boot logs into the moxxy TUI. The SDK defaults
+    // to 'inherit' which clobbers the chat with proxy-status lines on
+    // every boot. Set MOXXY_MCP_STDERR=inherit to opt back in for
+    // debugging.
+    const stderrMode: 'inherit' | 'ignore' =
+      process.env.MOXXY_MCP_STDERR === 'inherit' ? 'inherit' : 'ignore';
     return new StdioClientTransport({
       command: stdioServer.command,
       args: stdioServer.args ? [...stdioServer.args] : undefined,
       env: stdioServer.env,
       cwd: stdioServer.cwd,
+      stderr: stderrMode,
     });
   }
   const httpish = server as { url: string; headers?: Record<string, string> };
