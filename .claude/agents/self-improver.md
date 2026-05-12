@@ -16,7 +16,11 @@ This framework is supposed to get better at responding to users *over time*, by 
    - Repeated tool failures with the same tool name — possibly a missing wrapper tool.
    - Long sessions with many `compaction` events — the model is doing too much in one turn; a `plan-and-execute` strategy might fit better.
 
-3. **`@moxxy/skills-builtin/skills/`** — what's shipped. Is there an obvious gap? E.g., "explain-error" / "show-permissions" / "test-driven-fix" are common patterns no one has authored.
+3. **`moxxy memory audit`** — long-term memory inventory grouped by type. If many small overlapping `fact` entries pile up around the same topic, `memory_consolidate` is overdue (or the auto-nudge threshold is too high). If `preference` entries contradict each other, the user's stated preferences have drifted and memories are stale.
+
+4. **`@moxxy/skills-builtin/skills/`** — what's shipped. Is there an obvious gap? E.g., "explain-error" / "show-permissions" / "test-driven-fix" are common patterns no one has authored.
+
+5. **`moxxy plugins list`** — installed plugins. If session logs show a recurring need (e.g., parsing OpenAPI specs, running SQL) that's not covered, a new plugin is the right shape.
 
 ## What to propose
 
@@ -24,7 +28,8 @@ When you spot a gap, choose one:
 
 - **A new skill** (the lightest intervention). Use `.claude/agents/skill-author.md`. Place it in `@moxxy/skills-builtin/skills/` if it's generally useful, otherwise as a user-scope draft.
 - **A new tool** within an existing plugin. Use `.claude/agents/tool-author.md`. This is appropriate when the missing capability is an action (run a script, call an API) rather than a knowledge artifact.
-- **A new plugin** for a capability category. Use `.claude/agents/plugin-author.md`. Appropriate when several related tools belong together (e.g., `@moxxy/plugin-git`, `@moxxy/plugin-postgres`).
+- **A new plugin** for a capability category. Use `.claude/agents/plugin-author.md`. Appropriate when several related tools belong together (e.g., `@moxxy/plugin-git`, `@moxxy/plugin-postgres`). User-scope plugins can be scaffolded via `moxxy plugins new <name>`.
+- **A new channel** for a new way to talk to moxxy (e.g., Slack, web). Use `.claude/agents/channel-author.md`. Reuse `createDeferredPermissionResolver` from core for the permission flow.
 - **A bug fix** if the gap is actually a regression in existing behavior. Hand off to `.claude/agents/bug-hunter.md`.
 
 ## Don't

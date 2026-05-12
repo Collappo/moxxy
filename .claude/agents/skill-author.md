@@ -58,4 +58,12 @@ When the agent itself decides a skill is needed (the user's intent matches nothi
 - Appends to `~/.moxxy/skills/.meta/created.jsonl` for the audit trail.
 - Emits `SkillCreatedEvent` and hot-reloads the registry.
 
-If you are the synthesizing agent, follow the same conventions: keep frontmatter slug-clean, keep the body short, declare exactly the tools you need (no more).
+If you are the synthesizing agent, follow the same conventions: keep frontmatter slug-clean, keep the body short, declare exactly the tools you need (no more). The skill author tool atomically swaps the registry (`SkillRegistryImpl.replaceAll`) so concurrent skill lookups never observe an empty registry mid-rebuild.
+
+## Don't
+
+- **Don't put executable code in a skill.** Skills are prompts. If you need an action, declare a tool (or a plugin that contributes one) and reference it from the skill body.
+- **Don't list `allowed-tools` you don't actually use.** The list constrains what the agent can call while operating under this skill; tighter is safer.
+- **Don't write long prose.** If the body exceeds ~30 lines, you're documenting, not instructing. Move docs to a referenced file the skill tells the agent to Read.
+- **Don't include secrets, paths, or env vars in the body.** Skills travel via `~/.moxxy/skills/` and (for project scope) into the git repo.
+- **Don't hand-create skills in `<plugin>/skills/`.** Plugin skills are bundled by the plugin's `skillsDir` field; the loader picks them up automatically.

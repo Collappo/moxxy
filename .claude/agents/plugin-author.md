@@ -1,15 +1,23 @@
 ---
 name: plugin-author
-description: Scaffold a new @moxxy/plugin-* package and wire it for hot-load.
+description: Scaffold a new @moxxy/plugin-* package and wire it for auto-discovery.
 ---
 
 # Plugin author — ship a new `@moxxy/plugin-*`
 
-Plugins are TypeScript packages distributed under the `@moxxy/*` scope. They contribute tools, providers, loop strategies, compactors, and lifecycle hooks via `definePlugin` from `@moxxy/sdk`.
+Plugins are TypeScript packages distributed under the `@moxxy/*` scope (or your own scope — discovery only requires the `moxxy.plugin.entry` field in `package.json`). They contribute `tools`, `providers`, `loopStrategies`, `compactors`, `channels`, and `hooks` via `definePlugin` from `@moxxy/sdk`.
 
-## Skeleton
+## Scaffolding
 
-Create `packages/plugin-<thing>/`:
+For a user-scope plugin (no workspace edits needed):
+
+```sh
+moxxy plugins new <name>          # creates ~/.moxxy/plugins/<name>/
+moxxy plugins new <name> --here   # creates ./<name>/
+moxxy plugins reload              # hot-load without restart
+```
+
+For a workspace plugin (shipped in the repo), create `packages/plugin-<thing>/`:
 
 ```jsonc
 // packages/plugin-<thing>/package.json
@@ -21,8 +29,7 @@ Create `packages/plugin-<thing>/`:
   "types": "./dist/index.d.ts",
   "moxxy": {
     "plugin": {
-      "entry": "./src/index.ts",   // .ts in dev (jiti), .js in prod
-      "kind": "tools"              // tools|provider|loop|compactor|mcp|cli|hooks
+      "entry": "./src/index.ts"   // .ts in dev (jiti loader), ./dist/index.js in prod
     }
   },
   "dependencies": { "@moxxy/sdk": "workspace:*" },
@@ -35,7 +42,8 @@ Create `packages/plugin-<thing>/`:
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "clean": "rm -rf dist .turbo"
   }
 }
 ```
@@ -56,7 +64,7 @@ const myTool = defineTool({
   description: 'one sentence',
   inputSchema: z.object({ input: z.string() }),
   permission: { action: 'prompt' },
-  handler: async ({ input }, ctx) => `echo: ${input}`,
+  handler: async ({ input }) => `echo: ${input}`,
 });
 
 export default definePlugin({
@@ -68,35 +76,76 @@ export default definePlugin({
 
 ## Wire it up
 
-1. Run `pnpm install` from repo root. The workspace auto-links the new package.
-2. The plugin host auto-discovers it via `package.json#moxxy.plugin`. No registration code needed.
-3. For hot-load in a running session, call `session.pluginHost.reload()` (or run the `reload_plugins` tool). The `tsx`/`jiti` loader handles `.ts` entries directly; production builds compile to `dist/`.
+1. `pnpm install` from repo root — the workspace auto-links the new package.
+2. Auto-discovery: `@moxxy/cli`'s `setup.ts` scans `cwd/node_modules` and `~/.moxxy/plugins/` for any `package.json#moxxy.plugin.entry` and loads them via the jiti loader. No central registration code.
+3. Hot-load mid-session: `session.pluginHost.reload()` (or the `reload_plugins` built-in tool).
 
 ## Lifecycle hooks
 
 ```ts
-import { definePlugin } from '@moxxy/sdk';
-
 export default definePlugin({
   name: '@moxxy/plugin-<thing>',
   hooks: {
-    onInit: async (ctx) => { /* setup */ },
-    onToolCall: async (ctx) => ({ action: 'allow' }),  // or 'deny' / 'rewrite'
-    onBeforeProviderCall: (req) => ({ ...req, system: (req.system ?? '') + ' extra' }),
-    onEvent: async (e) => { /* observe — read only */ },
-    onShutdown: async () => { /* cleanup */ },
+    onInit:               async (ctx) => { /* setup */ },
+    onTurnStart:          async (ctx) => { /* per-turn setup */ },
+    onBeforeProviderCall: async (req) => ({ ...req, system: (req.system ?? '') + ' extra' }),
+    onToolCall:           async (ctx) => ({ action: 'allow' }),  // or 'deny' | 'rewrite'
+    onToolResult:         async (ctx) => ctx.result,
+    onEvent:              async (e, ctx) => { /* observe — read only */ },
+    onTurnEnd:            async (ctx) => { /* per-turn cleanup */ },
+    onShutdown:           async (ctx) => { /* fires from Session.close() */ },
   },
 });
 ```
 
-`onToolCall` short-circuits on first `deny`. `onBeforeProviderCall` is a fold — each plugin's returned request feeds the next. `onEvent` is fan-out and read-only. Hook timeout defaults to 5s.
+- `onToolCall` short-circuits on first `deny`. `rewrite` mutates the input for downstream hooks + execution.
+- `onBeforeProviderCall` is a fold — each plugin's returned request feeds the next.
+- `onEvent` is fan-out and read-only. Throwing here is logged + swallowed.
+- Hook timeout defaults to 5s (`hookTimeoutMs` on `Session`).
+- `onShutdown` only fires when something calls `Session.close()` — channels' SIGINT handlers do this.
+
+## Plugins that need runtime services
+
+Use a factory function closing over the deps. The pattern is used by `buildVaultPlugin`, `buildMemoryPlugin`, `buildTelegramPlugin`, `buildSynthesizeSkillPlugin`:
+
+```ts
+export function buildThingPlugin(opts: { vault: VaultStore }): Plugin {
+  return definePlugin({
+    name: '@moxxy/plugin-thing',
+    tools: [
+      defineTool({
+        name: 'thing_secret',
+        inputSchema: z.object({}),
+        handler: async () => opts.vault.get('thing_token'),
+      }),
+    ],
+  });
+}
+```
+
+The CLI's `setup.ts` wires the factory; auto-discovered plugins use the no-arg `default export` form.
 
 ## Tests
 
-Mirror the `@moxxy/loop-tool-use` test pattern: build a small in-memory `Session` via `@moxxy/testing`'s helpers, register your plugin via `session.pluginHost.registerStatic(myPlugin)`, then drive a turn with `collectTurn(session, prompt)` and assert on emitted events.
+```ts
+import { describe, expect, it } from 'vitest';
+import { collectTurn } from '@moxxy/core';
+import { FakeProvider, createFakeSession, textReply } from '@moxxy/testing';
+import myPlugin from './index.js';
+
+it('does the thing', async () => {
+  const provider = new FakeProvider({ script: [textReply('done')] });
+  const session = createFakeSession({ provider });
+  session.pluginHost.registerStatic(myPlugin);
+  const events = await collectTurn(session, 'hi');
+  expect(events.find((e) => e.type === 'assistant_message')).toBeDefined();
+});
+```
 
 ## Don't
 
-- **Don't import from `@moxxy/core`.** Plugins consume only `@moxxy/sdk`. Core may re-export some helpers, but importing core couples your plugin to runtime internals.
-- **Don't bypass the permission engine.** Use `permission: { action: 'prompt' }` on any tool with side effects.
-- **Don't mutate inputs in-place inside `onBeforeProviderCall`.** Return a new request object.
+- **Don't import from `@moxxy/core`** unless your plugin is a channel or otherwise needs `Session`, `runTurn`, `createDeferredPermissionResolver`, etc. Pure tool/provider/loop plugins consume only `@moxxy/sdk`.
+- **Don't bypass the permission engine.** Use `permission: { action: 'prompt' }` (or `allow`/`deny` for system tools) on every tool with side effects.
+- **Don't mutate inputs in `onBeforeProviderCall`.** Return a new request object — it's a pipeline.
+- **Don't throw from `onEvent`.** Returns are ignored; throws are logged + swallowed. If you need to react, queue work and let it run async.
+- **Don't reach across the runtime/event-log boundary.** State is derived from the event log via selectors. If you need new state, emit an event (or extend the SDK's event union).
