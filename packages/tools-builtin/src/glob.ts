@@ -1,7 +1,7 @@
 import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
 import { defineTool, z } from '@moxxy/sdk';
-import { clampString, resolveSafe } from './util.js';
+import { clampString, globToRegExp, resolveSafe } from './util.js';
 
 export const globTool = defineTool({
   name: 'Glob',
@@ -79,12 +79,3 @@ async function* walk(
   }
 }
 
-function globToRegExp(pattern: string): RegExp {
-  const escaped = pattern
-    .replace(/[.+^${}()|[\]\\]/g, '\\$&')
-    .replace(/\?/g, '[^/]')
-    .replace(/\*\*\//g, '(?:.*/)?')
-    .replace(/\*\*/g, '.*')
-    .replace(/\*/g, '[^/]*');
-  return new RegExp('^' + escaped + '$');
-}

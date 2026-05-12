@@ -23,20 +23,17 @@ export {
   selectMessages,
   selectPendingToolCalls,
   selectCurrentTurn,
-  selectActiveSkillIds,
-  selectLoadedPlugins,
-  estimateTokens,
-  isToolCallResolved,
-  findEvent,
   type PendingToolCall,
 } from './events/selectors.js';
-export { newEventId, newTurnId, newSessionId, materializeEvent } from './events/factory.js';
+// newEventId + materializeEvent are module-private helpers used only by
+// EventLog.append; not re-exported.
+export { newTurnId, newSessionId } from './events/factory.js';
 export { ToolRegistryImpl, type ToolRegistry } from './registries/tools.js';
 export { ProviderRegistry } from './registries/providers.js';
 export { LoopRegistry } from './registries/loops.js';
 export { CompactorRegistry } from './registries/compactors.js';
 export { ChannelRegistryImpl } from './registries/channels.js';
-export { PluginHost, type PluginLoader, type PluginRegistrationEvent } from './plugins/host.js';
+export { PluginHost, type PluginLoader } from './plugins/host.js';
 export { HookDispatcherImpl } from './plugins/lifecycle.js';
 export { discoverPlugins } from './plugins/discovery.js';
 export { createPluginLoader, type JitiLoaderOptions } from './plugins/loader.js';
@@ -50,6 +47,10 @@ export {
   autoAllowResolver,
   denyByDefaultResolver,
   createCallbackResolver,
+  createDeferredPermissionResolver,
+  type DeferredPermissionResolver,
+  type DeferredPermissionResolverOptions,
+  type PermissionPromptHandler,
   createAllowListResolver,
 } from './permissions/resolvers.js';
 export { createLogger, silentLogger, type Logger, type LogLevel } from './logger.js';

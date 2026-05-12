@@ -2,18 +2,13 @@ import type {
   ContentBlock,
   EventLogReader,
   MoxxyEvent,
+  PendingToolCall,
   ProviderMessage,
   ToolCallId,
-  ToolCallRequestedEvent,
   TurnId,
 } from '@moxxy/sdk';
 
-export interface PendingToolCall {
-  readonly callId: ToolCallId;
-  readonly name: string;
-  readonly input: unknown;
-  readonly requestedAtSeq: number;
-}
+export type { PendingToolCall };
 
 export interface SelectMessagesOptions {
   readonly includeSystem?: string;
@@ -43,21 +38,6 @@ export function selectCurrentTurn(log: EventLogReader): TurnId | null {
     if (e) return e.turnId;
   }
   return null;
-}
-
-export function selectActiveSkillIds(log: EventLogReader): ReadonlyArray<string> {
-  const invoked = new Set<string>();
-  for (const e of log.ofType('skill_invoked')) invoked.add(e.skillId);
-  return [...invoked];
-}
-
-export function selectLoadedPlugins(log: EventLogReader): ReadonlyArray<{ name: string; version: string }> {
-  const loaded = new Map<string, { name: string; version: string }>();
-  for (const e of log.slice()) {
-    if (e.type === 'plugin_registered') loaded.set(e.name, { name: e.name, version: e.version });
-    else if (e.type === 'plugin_unregistered') loaded.delete(e.name);
-  }
-  return [...loaded.values()];
 }
 
 interface CompactionRange {
@@ -184,31 +164,3 @@ function serializeToolOutput(output: unknown, error?: { message: string; kind: s
   }
 }
 
-export function estimateTokens(messages: ReadonlyArray<ProviderMessage>): number {
-  let chars = 0;
-  for (const m of messages) {
-    for (const block of m.content) {
-      if (block.type === 'text') chars += block.text.length;
-      else if (block.type === 'tool_use') chars += block.name.length + JSON.stringify(block.input).length;
-      else if (block.type === 'tool_result') chars += block.content.length;
-    }
-  }
-  return Math.ceil(chars / 4);
-}
-
-export function isToolCallResolved(callId: ToolCallId, log: EventLogReader): boolean {
-  for (const e of log.slice()) {
-    if ((e.type === 'tool_result' || e.type === 'tool_call_denied') && e.callId === callId) return true;
-  }
-  return false;
-}
-
-export function findEvent<T extends MoxxyEvent['type']>(
-  log: EventLogReader,
-  type: T,
-  predicate: (e: Extract<MoxxyEvent, { type: T }>) => boolean,
-): Extract<MoxxyEvent, { type: T }> | undefined {
-  return log.ofType(type).find((e) => predicate(e as Extract<MoxxyEvent, { type: T }>));
-}
-
-export type { ToolCallRequestedEvent };

@@ -4,7 +4,9 @@ import type {
   ModelDescriptor,
   ProviderEvent,
   ProviderRequest,
+  StopReason,
 } from '@moxxy/sdk';
+import { isRetryableError } from '@moxxy/sdk';
 import { toAnthropicMessages, toAnthropicTools } from './translate.js';
 
 export interface AnthropicProviderConfig {
@@ -57,7 +59,7 @@ export class AnthropicProvider implements LLMProvider {
       yield {
         type: 'error',
         message: err instanceof Error ? err.message : String(err),
-        retryable: isRetryable(err),
+        retryable: isRetryableError(err),
       };
       return;
     }
@@ -69,7 +71,7 @@ export class AnthropicProvider implements LLMProvider {
     // we used to return the first key in `pendingToolUses` for every event,
     // causing two parallel blocks to overwrite each other's partial JSON.
     const blockIndexToId = new Map<number, string>();
-    let stopReason: 'end_turn' | 'tool_use' | 'max_tokens' | 'stop_sequence' | 'error' = 'end_turn';
+    let stopReason: StopReason = 'end_turn';
     let usage: { inputTokens: number; outputTokens: number } | undefined;
 
     try {
@@ -153,7 +155,7 @@ export class AnthropicProvider implements LLMProvider {
       yield {
         type: 'error',
         message: err instanceof Error ? err.message : String(err),
-        retryable: isRetryable(err),
+        retryable: isRetryableError(err),
       };
       return;
     }
@@ -218,18 +220,10 @@ function idOfBlock(
   return null;
 }
 
-function mapStopReason(s: string): 'end_turn' | 'tool_use' | 'max_tokens' | 'stop_sequence' | 'error' {
+function mapStopReason(s: string): StopReason {
   if (s === 'tool_use') return 'tool_use';
   if (s === 'max_tokens') return 'max_tokens';
   if (s === 'stop_sequence') return 'stop_sequence';
   if (s === 'end_turn') return 'end_turn';
   return 'error';
-}
-
-function isRetryable(err: unknown): boolean {
-  if (!(err instanceof Error)) return false;
-  const msg = err.message.toLowerCase();
-  if (msg.includes('rate_limit') || msg.includes('429') || msg.includes('overloaded')) return true;
-  if (msg.includes('econnreset') || msg.includes('etimedout') || msg.includes('network')) return true;
-  return false;
 }

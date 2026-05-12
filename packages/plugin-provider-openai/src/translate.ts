@@ -1,4 +1,5 @@
 import type { ContentBlock, ProviderMessage, ToolDef } from '@moxxy/sdk';
+import { zodToJsonSchema } from '@moxxy/sdk';
 
 export interface OpenAIChatMessage {
   role: 'system' | 'user' | 'assistant' | 'tool';
@@ -81,31 +82,6 @@ export function toOpenAITools(tools: ReadonlyArray<ToolDef>): OpenAIToolDef[] {
       parameters: (t.inputJsonSchema ?? zodToJsonSchema(t.inputSchema)) as unknown,
     },
   }));
-}
-
-function zodToJsonSchema(schema: unknown): unknown {
-  const s = schema as { _def?: { typeName?: string }; toJSON?: () => unknown };
-  if (typeof s.toJSON === 'function') return s.toJSON();
-  const def = s._def;
-  const typeName = def?.typeName;
-  if (typeName === 'ZodObject') {
-    const shape = (def as unknown as { shape: () => Record<string, unknown> }).shape();
-    const properties: Record<string, unknown> = {};
-    const required: string[] = [];
-    for (const [key, value] of Object.entries(shape)) {
-      properties[key] = zodToJsonSchema(value);
-      const inner = (value as { isOptional?: () => boolean }).isOptional?.();
-      if (!inner) required.push(key);
-    }
-    return { type: 'object', properties, required };
-  }
-  if (typeName === 'ZodString') return { type: 'string' };
-  if (typeName === 'ZodNumber') return { type: 'number' };
-  if (typeName === 'ZodBoolean') return { type: 'boolean' };
-  if (typeName === 'ZodArray') {
-    return { type: 'array', items: zodToJsonSchema((def as unknown as { type: unknown }).type) };
-  }
-  return { type: 'object' };
 }
 
 void (null as unknown as ContentBlock);

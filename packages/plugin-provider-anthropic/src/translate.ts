@@ -1,4 +1,5 @@
 import type { ContentBlock, ProviderMessage, ToolDef } from '@moxxy/sdk';
+import { zodToJsonSchema } from '@moxxy/sdk';
 
 export interface AnthropicMessageInput {
   role: 'user' | 'assistant';
@@ -100,30 +101,3 @@ export function toAnthropicTools(tools: ReadonlyArray<ToolDef>): AnthropicToolDe
   }));
 }
 
-// Minimal zod->json-schema conversion. For richer schemas users can add zod-to-json-schema.
-function zodToJsonSchema(schema: unknown): unknown {
-  const s = schema as { _def?: { typeName?: string }; toJSON?: () => unknown };
-  if (typeof s.toJSON === 'function') return s.toJSON();
-  // Fallback: best-effort shape based on zod's _def
-  const def = s._def;
-  const typeName = def?.typeName;
-  if (typeName === 'ZodObject') {
-    const shape = (def as unknown as { shape: () => Record<string, unknown> }).shape();
-    const properties: Record<string, unknown> = {};
-    const required: string[] = [];
-    for (const [key, value] of Object.entries(shape)) {
-      properties[key] = zodToJsonSchema(value);
-      const inner = (value as { isOptional?: () => boolean }).isOptional?.();
-      if (!inner) required.push(key);
-    }
-    return { type: 'object', properties, required };
-  }
-  if (typeName === 'ZodString') return { type: 'string' };
-  if (typeName === 'ZodNumber') return { type: 'number' };
-  if (typeName === 'ZodBoolean') return { type: 'boolean' };
-  if (typeName === 'ZodArray') {
-    const items = zodToJsonSchema((def as unknown as { type: unknown }).type);
-    return { type: 'array', items };
-  }
-  return {};
-}

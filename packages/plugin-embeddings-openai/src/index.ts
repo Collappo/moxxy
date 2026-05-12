@@ -4,4 +4,5 @@ export {
   type OpenAIEmbedderOptions,
   type OpenAIEmbeddingModel,
 } from './embedder.js';
-export { CachedEmbeddingProvider } from './cache.js';
+// Re-export for backwards compatibility; new code should import directly from @moxxy/sdk.
+export { CachedEmbeddingProvider } from '@moxxy/sdk';

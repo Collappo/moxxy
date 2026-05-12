@@ -1,34 +1,29 @@
-import type { PendingToolCall, PermissionContext, PermissionDecision, PermissionResolver } from '@moxxy/sdk';
+import {
+  createDeferredPermissionResolver,
+  type DeferredPermissionResolver,
+  type DeferredPermissionResolverOptions,
+  type PermissionPromptHandler,
+} from '@moxxy/core';
 
-export type PermissionPromptHandler = (
-  call: PendingToolCall,
-  ctx: PermissionContext,
-) => Promise<PermissionDecision>;
+export type { PermissionPromptHandler };
 
-export interface InteractivePermissionResolverOptions {
-  readonly prompt: PermissionPromptHandler;
-  readonly name?: string;
-  readonly sessionAllows?: Set<string>;
-}
+export interface InteractivePermissionResolverOptions extends DeferredPermissionResolverOptions {}
 
 /**
- * Build a PermissionResolver around an interactive prompt. The `prompt` callback
- * is what an Ink dialog (or readline) implements. This resolver remembers
- * `allow_session` decisions and short-circuits subsequent calls to the same tool.
+ * Build a PermissionResolver around an interactive prompt. Thin alias over
+ * core's `createDeferredPermissionResolver` — kept for backwards compat with
+ * the previous import path.
+ *
+ * For new code, prefer importing `createDeferredPermissionResolver` from
+ * `@moxxy/core` directly: the same resolver shape is shared with other
+ * channels (Telegram, future web/Slack).
  */
 export function createInteractivePermissionResolver(
   opts: InteractivePermissionResolverOptions,
-): PermissionResolver {
-  const sessionAllows = opts.sessionAllows ?? new Set<string>();
-  return {
+): DeferredPermissionResolver {
+  return createDeferredPermissionResolver({
     name: opts.name ?? 'interactive',
-    async check(call, ctx) {
-      if (sessionAllows.has(call.name)) {
-        return { mode: 'allow_session', reason: 'allow_session previously granted' };
-      }
-      const decision = await opts.prompt(call, ctx);
-      if (decision.mode === 'allow_session') sessionAllows.add(call.name);
-      return decision;
-    },
-  };
+    prompt: opts.prompt,
+    sessionAllows: opts.sessionAllows,
+  });
 }

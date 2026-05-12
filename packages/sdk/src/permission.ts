@@ -17,6 +17,12 @@ export interface PendingToolCall {
   readonly callId: ToolCallRequestedEvent['callId'];
   readonly name: string;
   readonly input: unknown;
+  /**
+   * Sequence number of the `tool_call_requested` event in the EventLog.
+   * Optional because permission resolvers may construct PendingToolCalls
+   * for evaluations that aren't yet on the log (e.g., hook rewrites).
+   */
+  readonly requestedAtSeq?: number;
 }
 
 export interface PermissionContext {

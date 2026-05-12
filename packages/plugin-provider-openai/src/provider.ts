@@ -4,7 +4,9 @@ import type {
   ModelDescriptor,
   ProviderEvent,
   ProviderRequest,
+  StopReason,
 } from '@moxxy/sdk';
+import { isRetryableError } from '@moxxy/sdk';
 import { toOpenAIMessages, toOpenAITools } from './translate.js';
 
 export interface OpenAIProviderConfig {
@@ -64,13 +66,13 @@ export class OpenAIProvider implements LLMProvider {
       yield {
         type: 'error',
         message: err instanceof Error ? err.message : String(err),
-        retryable: isRetryable(err),
+        retryable: isRetryableError(err),
       };
       return;
     }
 
     const pending = new Map<number, PendingToolCall>();
-    let stopReason: 'end_turn' | 'tool_use' | 'max_tokens' | 'stop_sequence' | 'error' = 'end_turn';
+    let stopReason: StopReason = 'end_turn';
     let usageIn = 0;
     let usageOut = 0;
 
@@ -128,7 +130,7 @@ export class OpenAIProvider implements LLMProvider {
       yield {
         type: 'error',
         message: err instanceof Error ? err.message : String(err),
-        retryable: isRetryable(err),
+        retryable: isRetryableError(err),
       };
       return;
     }
@@ -181,18 +183,10 @@ interface OpenAIStreamChunk {
   usage?: { prompt_tokens?: number; completion_tokens?: number };
 }
 
-function mapStopReason(s: string): 'end_turn' | 'tool_use' | 'max_tokens' | 'stop_sequence' | 'error' {
+function mapStopReason(s: string): StopReason {
   if (s === 'tool_calls') return 'tool_use';
   if (s === 'length') return 'max_tokens';
   if (s === 'stop') return 'end_turn';
   if (s === 'content_filter') return 'error';
   return 'end_turn';
-}
-
-function isRetryable(err: unknown): boolean {
-  if (!(err instanceof Error)) return false;
-  const msg = err.message.toLowerCase();
-  if (msg.includes('rate_limit') || msg.includes('429') || msg.includes('overloaded')) return true;
-  if (msg.includes('econnreset') || msg.includes('etimedout') || msg.includes('network')) return true;
-  return false;
 }

@@ -1,14 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { EventLog } from './log.js';
 import {
-  estimateTokens,
-  isToolCallResolved,
   selectCurrentTurn,
   selectMessages,
   selectPendingToolCalls,
-  selectLoadedPlugins,
 } from './selectors.js';
-import { asPluginId, asSessionId, asToolCallId, asTurnId } from '@moxxy/sdk';
+import { asSessionId, asToolCallId, asTurnId } from '@moxxy/sdk';
 
 const sid = asSessionId('s1');
 const tid = asTurnId('t1');
@@ -169,56 +166,3 @@ describe('selectCurrentTurn', () => {
   });
 });
 
-describe('selectLoadedPlugins', () => {
-  it('reflects register/unregister history', async () => {
-    const log = new EventLog();
-    const p = asPluginId('plg1');
-    await log.append({
-      type: 'plugin_registered',
-      sessionId: sid,
-      turnId: tid,
-      source: 'system',
-      pluginId: p,
-      name: 'foo',
-      version: '1.0.0',
-      kind: ['tools'],
-    });
-    expect(selectLoadedPlugins(log)).toEqual([{ name: 'foo', version: '1.0.0' }]);
-    await log.append({
-      type: 'plugin_unregistered',
-      sessionId: sid,
-      turnId: tid,
-      source: 'system',
-      pluginId: p,
-      name: 'foo',
-      reason: 'reload',
-    });
-    expect(selectLoadedPlugins(log)).toEqual([]);
-  });
-});
-
-describe('isToolCallResolved', () => {
-  it('detects resolution via result or denial', async () => {
-    const log = new EventLog();
-    expect(isToolCallResolved(c1, log)).toBe(false);
-    await log.append({
-      type: 'tool_result',
-      sessionId: sid,
-      turnId: tid,
-      source: 'tool',
-      callId: c1,
-      ok: true,
-      output: '',
-    });
-    expect(isToolCallResolved(c1, log)).toBe(true);
-  });
-});
-
-describe('estimateTokens', () => {
-  it('approximates ~chars/4', () => {
-    const tokens = estimateTokens([
-      { role: 'user', content: [{ type: 'text', text: 'hello world' }] },
-    ]);
-    expect(tokens).toBe(Math.ceil('hello world'.length / 4));
-  });
-});

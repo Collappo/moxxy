@@ -70,11 +70,8 @@ describe('PluginHost', () => {
     expect(() => host.registerStatic(p)).toThrow(/already registered/);
   });
 
-  it('unload removes contributions and emits unregistered', async () => {
+  it('unload removes contributions', async () => {
     const { host, tools } = makeHost();
-    const events: string[] = [];
-    host.subscribe((e) => events.push(e.kind));
-
     const tool = defineTool({
       name: 'e',
       description: '',
@@ -86,7 +83,6 @@ describe('PluginHost', () => {
     expect(tools.has('e')).toBe(true);
     await host.unload('demo');
     expect(tools.has('e')).toBe(false);
-    expect(events).toEqual(['registered', 'unregistered']);
   });
 
   it('discoverAndLoad without loader warns and returns nothing', async () => {

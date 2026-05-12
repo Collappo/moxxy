@@ -1,8 +1,6 @@
 import type {
-  AppContext,
   ChannelDef,
   CompactorDef,
-  LifecycleHooks,
   LoopStrategyDef,
   Plugin,
   PluginHostHandle,
@@ -45,15 +43,8 @@ interface LoadedRecord {
   readonly channelNames: ReadonlyArray<string>;
 }
 
-export interface PluginRegistrationEvent {
-  readonly kind: 'registered' | 'unregistered';
-  readonly plugin: Plugin;
-  readonly manifest?: ResolvedPluginManifest;
-}
-
 export class PluginHost implements PluginHostHandle {
   private readonly loaded = new Map<string, LoadedRecord>();
-  private readonly listeners = new Set<(event: PluginRegistrationEvent) => void>();
 
   constructor(private readonly opts: PluginHostOptions) {}
 
@@ -65,11 +56,6 @@ export class PluginHost implements PluginHostHandle {
     }));
   }
 
-  subscribe(fn: (event: PluginRegistrationEvent) => void): () => void {
-    this.listeners.add(fn);
-    return () => this.listeners.delete(fn);
-  }
-
   registerStatic(plugin: Plugin): void {
     if (this.loaded.has(plugin.name)) {
       throw new Error(`Plugin already registered: ${plugin.name}`);
@@ -77,7 +63,6 @@ export class PluginHost implements PluginHostHandle {
     const record = this.applyPlugin(plugin);
     this.loaded.set(plugin.name, record);
     this.refreshDispatcher();
-    this.emit({ kind: 'registered', plugin });
   }
 
   async discoverAndLoad(extraPaths?: ReadonlyArray<string>): Promise<ReadonlyArray<Plugin>> {
@@ -101,7 +86,6 @@ export class PluginHost implements PluginHostHandle {
         const record = this.applyPlugin(plugin, manifest);
         this.loaded.set(plugin.name, record);
         loaded.push(plugin);
-        this.emit({ kind: 'registered', plugin, manifest });
       } catch (err) {
         this.opts.logger.warn('PluginHost: failed to load plugin', {
           package: manifest.packageName,
@@ -113,7 +97,7 @@ export class PluginHost implements PluginHostHandle {
     return loaded;
   }
 
-  async unload(name: string, _ctx?: AppContext): Promise<void> {
+  async unload(name: string): Promise<void> {
     const record = this.loaded.get(name);
     if (!record) return;
     for (const toolName of record.toolNames) this.opts.tools.unregister(toolName);
@@ -123,7 +107,6 @@ export class PluginHost implements PluginHostHandle {
     for (const channelName of record.channelNames) this.opts.channels.unregister(channelName);
     this.loaded.delete(name);
     this.refreshDispatcher();
-    this.emit({ kind: 'unregistered', plugin: record.plugin, manifest: record.manifest });
   }
 
   async reload(): Promise<void> {
@@ -137,13 +120,6 @@ export class PluginHost implements PluginHostHandle {
       if (!wanted.has(name)) await this.unload(name);
     }
     await this.discoverAndLoad();
-  }
-
-  getHooks(): ReadonlyArray<{ name: string; hooks: LifecycleHooks }> {
-    return [...this.loaded.values()].map((r) => ({
-      name: r.plugin.name,
-      hooks: r.plugin.hooks ?? {},
-    }));
   }
 
   private applyPlugin(plugin: Plugin, manifest?: ResolvedPluginManifest): LoadedRecord {
@@ -164,15 +140,5 @@ export class PluginHost implements PluginHostHandle {
 
   private refreshDispatcher(): void {
     this.opts.dispatcher.setPlugins([...this.loaded.values()].map((r) => r.plugin));
-  }
-
-  private emit(event: PluginRegistrationEvent): void {
-    for (const fn of this.listeners) {
-      try {
-        fn(event);
-      } catch (err) {
-        this.opts.logger.warn('PluginHost listener threw', { err: String(err) });
-      }
-    }
   }
 }

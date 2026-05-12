@@ -60,6 +60,7 @@ export type {
   ProviderDef,
   ProviderKeyValidation,
 } from './provider.js';
+export { isRetryableError, zodToJsonSchema, type StopReason } from './provider-utils.js';
 
 export type { TokenBudget, CompactContext, CompactorDef } from './compactor.js';
 
@@ -105,6 +106,7 @@ export type {
   ChannelCommandArgs,
 } from './channel.js';
 export type { EmbeddingProvider } from './embedding.js';
+export { CachedEmbeddingProvider } from './embedding-cache.js';
 
 export interface PluginLoader {
   load(manifest: import('./plugin.js').ResolvedPluginManifest): Promise<import('./plugin.js').Plugin>;

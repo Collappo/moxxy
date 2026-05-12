@@ -60,6 +60,9 @@ export class TuiChannel implements Channel<TuiStartOpts> {
     return {
       running: this.inkInstance.waitUntilExit(),
       stop: async () => {
+        // Reject any in-flight permission prompts so callers awaiting them
+        // don't hang once the UI is gone.
+        this.permissionResolver.abortAll('TUI unmounted');
         this.inkInstance?.unmount();
       },
     };

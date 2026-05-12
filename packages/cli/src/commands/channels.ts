@@ -18,7 +18,7 @@ export async function runChannelsCommand(argv: ParsedArgv): Promise<number> {
   const [name, sub, ...rest] = argv.positional;
 
   if (!name || name === 'list') {
-    return runList(argv);
+    return runList();
   }
 
   const { session, vault, config } = await setupSessionWithConfig({
@@ -79,7 +79,7 @@ export async function runChannelsCommand(argv: ParsedArgv): Promise<number> {
   });
 }
 
-async function runList(argv: ParsedArgv): Promise<number> {
+async function runList(): Promise<number> {
   const { session, vault, config } = await setupSessionWithConfig({
     cwd: process.cwd(),
     skipKeyPrompt: true,
@@ -107,6 +107,5 @@ async function runList(argv: ParsedArgv): Promise<number> {
       }
     }
   }
-  void argv;
   return 0;
 }

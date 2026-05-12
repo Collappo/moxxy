@@ -43,3 +43,17 @@ export function clampString(s: string, max: number): string {
   if (s.length <= max) return s;
   return s.slice(0, max) + `\n... [truncated ${s.length - max} chars]`;
 }
+
+/**
+ * Convert a glob pattern (`**`, `*`, `?`) to an anchored RegExp. Shared by
+ * the Glob and Grep tools; not exposed externally.
+ */
+export function globToRegExp(pattern: string): RegExp {
+  const escaped = pattern
+    .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+    .replace(/\?/g, '[^/]')
+    .replace(/\*\*\//g, '(?:.*/)?')
+    .replace(/\*\*/g, '.*')
+    .replace(/\*/g, '[^/]*');
+  return new RegExp('^' + escaped + '$');
+}

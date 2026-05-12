@@ -1,4 +1,3 @@
-import type { ProviderRegistry } from '@moxxy/core';
 import type { ProviderKeyValidation } from '@moxxy/sdk';
 
 /**
@@ -24,5 +23,3 @@ export async function validateProviderKey(
   }
   return await def.validateKey(key);
 }
-
-export type { ProviderRegistry };
