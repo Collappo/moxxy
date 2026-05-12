@@ -14,6 +14,10 @@ export interface SlashCommand {
 
 export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<SlashCommand> = [
   { name: 'exit', description: 'Quit the TUI', aliases: ['quit', 'q'] },
+  {
+    name: 'new',
+    description: 'Start a fresh session — wipes conversation history (keeps model + loop choice)',
+  },
   { name: 'clear', description: 'Clear the chat scrollback (events stay in the log)' },
   { name: 'tools', description: 'List the tools the active session can call' },
   { name: 'skills', description: 'List the discovered skills' },
@@ -24,6 +28,8 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<SlashCommand> = [
     description: 'Toggle auto-approve mode — every tool call allowed without asking',
     aliases: ['auto-approve'],
   },
+  { name: 'expand', description: 'Expand closed skill scopes so children show in the chat' },
+  { name: 'collapse', description: 'Collapse closed skill scopes back to a one-line summary' },
   { name: 'help', description: 'Show this command list' },
 ];
 

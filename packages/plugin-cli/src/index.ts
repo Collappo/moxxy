@@ -12,6 +12,7 @@ export {
 } from './resolver.js';
 export { TuiChannel, type TuiStartOpts } from './TuiChannel.js';
 export { PermissionEditor, type PermissionEditorProps } from './components/PermissionEditor.js';
+export { Logo } from './components/Logo.js';
 export {
   SetupWizard,
   type SetupWizardProps,
@@ -19,6 +20,12 @@ export {
   type SetupChoice,
   renderYaml,
 } from './components/SetupWizard.js';
+export {
+  loadPreferences,
+  savePreferences,
+  preferencesPath,
+  type MoxxyPreferences,
+} from '@moxxy/core';
 
 export const tuiChannelDef = defineChannel({
   name: 'tui',

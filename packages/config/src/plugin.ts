@@ -22,6 +22,10 @@ export type ConfigApplier = (snapshot: MoxxyConfig) => Promise<ConfigApplyResult
 
 const scopeSchema = z.enum(['user', 'project']);
 type Scope = z.infer<typeof scopeSchema>;
+// Default scope when the model omits it. Project-local is the safer
+// default for read tools — touching the user-global file is usually an
+// explicit operator action, not an inferred one.
+const scopeSchemaOptional = scopeSchema.optional().default('project');
 
 const USER_YAML = (): string => path.join(os.homedir(), '.moxxy', 'config.yaml');
 
@@ -95,8 +99,10 @@ export function buildConfigPlugin(
       defineTool({
         name: 'config_path',
         description:
-          'Return the resolved file path for the moxxy config at a given scope. Returns null if no file exists yet.',
-        inputSchema: z.object({ scope: scopeSchema }),
+          'Return the resolved file path for the moxxy config at a given scope ' +
+          '(defaults to "project" — the moxxy.config.yaml in the current dir). ' +
+          'Returns null if no file exists yet.',
+        inputSchema: z.object({ scope: scopeSchemaOptional }),
         handler: async ({ scope }) => {
           const found = await findScopePath(scope, cwd);
           return { scope, path: found, defaultPath: scopeDefaultPath(scope, cwd) };
@@ -105,8 +111,9 @@ export function buildConfigPlugin(
       defineTool({
         name: 'config_show',
         description:
-          'Return the raw text of the moxxy config at the given scope. Useful when the agent needs to inspect or edit it.',
-        inputSchema: z.object({ scope: scopeSchema }),
+          'Return the raw text of the moxxy config at the given scope (defaults to "project"). ' +
+          'Useful when the agent needs to inspect or edit it.',
+        inputSchema: z.object({ scope: scopeSchemaOptional }),
         handler: async ({ scope }) => {
           const found = await findScopePath(scope, cwd);
           if (!found) return { scope, path: null, text: '' };
@@ -118,7 +125,7 @@ export function buildConfigPlugin(
         name: 'config_get',
         description:
           'Read a single value from the config by dot-path (e.g. "provider.model"). Returns the parsed JSON value.',
-        inputSchema: z.object({ scope: scopeSchema, path: z.string().min(1) }),
+        inputSchema: z.object({ scope: scopeSchemaOptional, path: z.string().min(1) }),
         handler: async ({ scope, path: dotPath }) => {
           const found = await findScopePath(scope, cwd);
           if (!found) return null;

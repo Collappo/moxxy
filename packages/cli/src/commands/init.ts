@@ -4,6 +4,7 @@ import { bootSessionWithConfig } from '../argv-helpers.js';
 import { canonicalKey } from '../provider-keys.js';
 import { validateProviderKey } from '../validate-key.js';
 import type { ParsedArgv } from '../argv.js';
+import { cliVersion } from '../version.js';
 
 /**
  * Interactive first-time setup. Mounts the Ink-based SetupWizard, which walks
@@ -40,12 +41,13 @@ export async function runInitCommand(argv: ParsedArgv): Promise<number> {
   // then Ink takes over with an unlocked vault and vault.set() is silent.
   await vault.open();
 
-  const [React, { render }, plugin] = await Promise.all([
+  const [React, ink, plugin] = await Promise.all([
     import('react'),
     import('ink'),
     import('@moxxy/plugin-cli'),
   ]);
-  const { SetupWizard } = plugin;
+  const { render, Box, Text } = ink;
+  const { SetupWizard, Logo } = plugin;
 
   const providerDefs = session.providers.list();
   const providers = providerDefs.map((p) => ({
@@ -88,15 +90,36 @@ export async function runInitCommand(argv: ParsedArgv): Promise<number> {
     },
   };
 
+  const version = cliVersion();
   await new Promise<void>((resolve) => {
+    // Wrap the wizard with the Logo so a first-time user sees the moxxy
+    // banner during setup — gives a consistent visual identity between
+    // the bare `moxxy init` invocation and the auto-init that fires
+    // when there's no config yet.
+    const { Fragment, createElement } = React;
+    const banner = createElement(
+      Box,
+      { flexDirection: 'column', marginBottom: 1 },
+      createElement(Logo, version ? { version } : {}),
+      createElement(
+        Text,
+        { dimColor: true },
+        ' first-time setup — pick a provider, paste an API key, choose a model',
+      ),
+    );
     const { waitUntilExit } = render(
-      React.createElement(SetupWizard, {
-        providers,
-        models,
-        loops,
-        embedders,
-        controller,
-      }),
+      createElement(
+        Fragment,
+        null,
+        banner,
+        createElement(SetupWizard, {
+          providers,
+          models,
+          loops,
+          embedders,
+          controller,
+        }),
+      ),
     );
     void waitUntilExit().then(() => resolve());
   });

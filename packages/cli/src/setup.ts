@@ -12,6 +12,7 @@ import {
   denyByDefaultResolver,
   discoverPlugins,
   discoverSkills,
+  loadPreferences,
   PermissionEngine,
   silentLogger,
 } from '@moxxy/core';
@@ -38,6 +39,7 @@ import {
   type MemoryStore,
 } from '@moxxy/plugin-memory';
 import { buildTelegramPlugin } from '@moxxy/plugin-telegram';
+import { buildMcpAdminPlugin } from '@moxxy/plugin-mcp';
 import { cliPlugin } from '@moxxy/plugin-cli';
 import { httpChannelPlugin } from '@moxxy/plugin-channel-http';
 import { browserPlugin } from '@moxxy/plugin-browser';
@@ -98,6 +100,16 @@ export async function setupSessionWithConfig(opts: SetupOptions): Promise<SetupR
   const embedder = await buildEmbedder(rawConfig.embeddings, logger);
   const { plugin: memoryPlugin, store: memory } = buildMemoryPlugin({ embedder });
 
+  // MCP servers are now lazy-loaded: the admin plugin's onInit hook
+  // reads ~/.moxxy/mcp.json and registers stub tools using each
+  // server's cached descriptors WITHOUT connecting. The actual MCP
+  // connection happens on the first invocation of a tool from that
+  // server. Boot stays instant even with many servers configured.
+  //
+  // Servers that have never been added before lack the descriptor
+  // cache; for those the user re-runs mcp_add_server (or
+  // mcp_test_server) and the cache populates.
+
   let config = rawConfig;
   if (containsPlaceholder(rawConfig)) {
     logger.info('resolving vault placeholders in config');
@@ -136,7 +148,25 @@ export async function setupSessionWithConfig(opts: SetupOptions): Promise<SetupR
     { name: '@moxxy/plugin-channel-http', plugin: httpChannelPlugin },
     { name: '@moxxy/plugin-telegram', plugin: buildTelegramPlugin({ vault }) },
     { name: '@moxxy/plugin-browser', plugin: browserPlugin },
-    { name: '@moxxy/synthesize-skill', plugin: buildSynthesizeSkillPlugin(session) },
+    // Admin tools (mcp_add_server, mcp_list_servers, mcp_remove_server,
+    // mcp_test_server) plus the boot-time lazy attach. Passing the
+    // session's live tool registry enables both hot-attach for runtime
+    // adds AND lazy stub registration in onInit for saved servers.
+    {
+      name: '@moxxy/plugin-mcp-admin',
+      plugin: buildMcpAdminPlugin({ toolRegistry: session.tools }),
+    },
+    {
+      name: '@moxxy/synthesize-skill',
+      // Thread the SAME directory set the boot scan uses so reload_skills
+      // doesn't drop builtin/plugin skills when invoked at runtime.
+      plugin: buildSynthesizeSkillPlugin(session, {
+        builtinDir: BUILTIN_SKILLS_DIR,
+        ...(rawConfig.skills?.extraDirs ? { pluginDirs: rawConfig.skills.extraDirs } : {}),
+        ...(rawConfig.skills?.projectDir ? { projectDir: rawConfig.skills.projectDir } : {}),
+        ...(rawConfig.skills?.userDir ? { userDir: rawConfig.skills.userDir } : {}),
+      }),
+    },
   ];
 
   const builtins: Array<{ name: string; plugin: Plugin }> = [
@@ -254,6 +284,45 @@ export async function setupSessionWithConfig(opts: SetupOptions): Promise<SetupR
     session.compactors.setActive(config.compactor);
   }
 
+  // Apply persisted runtime preferences (~/.moxxy/preferences.json).
+  // Order matters: provider must activate first (so its model list is
+  // available for the model field), then loop. We silently skip any
+  // pref that no longer references a registered plugin — a stale
+  // preference from a previous moxxy version shouldn't break boot.
+  try {
+    const prefs = await loadPreferences();
+    if (prefs.providerName && session.providers.list().some((p) => p.name === prefs.providerName)) {
+      try {
+        if (session.providers.getActiveName() !== prefs.providerName) {
+          session.providers.setActive(prefs.providerName);
+        }
+      } catch (err) {
+        logger.warn('failed to apply preferred provider', {
+          providerName: prefs.providerName,
+          err: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+    if (prefs.loopStrategy && session.loops.list().some((s) => s.name === prefs.loopStrategy)) {
+      try {
+        session.loops.setActive(prefs.loopStrategy);
+      } catch (err) {
+        logger.warn('failed to apply preferred loop strategy', {
+          loopStrategy: prefs.loopStrategy,
+          err: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+    // Note: the persisted `model` is applied by the TUI / one-shot
+    // entrypoints (they own which model gets passed to runTurn). We
+    // surface it via the returned config so callers can pick it up.
+  } catch (err) {
+    // Preferences are best-effort; never block session boot on them.
+    logger.warn('failed to load preferences', {
+      err: err instanceof Error ? err.message : String(err),
+    });
+  }
+
   const discovered = await discoverSkills({
     projectDir: config.skills?.projectDir ?? defaultProjectSkillsDir(opts.cwd),
     userDir: config.skills?.userDir ?? defaultUserSkillsDir(),
@@ -262,6 +331,13 @@ export async function setupSessionWithConfig(opts: SetupOptions): Promise<SetupR
     logger,
   });
   for (const skill of discovered) session.skills.register(skill);
+
+  // Fire onInit lifecycle hooks now that every plugin is registered and
+  // every skill is loaded. Hooks observe the fully-populated session
+  // and can do session-level setup (e.g. the MCP admin plugin registers
+  // lazy stubs for saved servers here). Failures are non-fatal — the
+  // dispatcher records them as ErrorEvents but startup proceeds.
+  await session.dispatcher.dispatchInit(session.appContext());
 
   return { session, config, configSources: sources, vault, memory };
 }

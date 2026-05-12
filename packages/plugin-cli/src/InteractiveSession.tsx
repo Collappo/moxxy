@@ -1,17 +1,28 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Box, Text, useApp, useInput } from 'ink';
-import type { MoxxyEvent, PendingToolCall, PermissionContext, PermissionDecision } from '@moxxy/sdk';
+import type {
+  ApprovalDecision,
+  ApprovalRequest,
+  MoxxyEvent,
+  PendingToolCall,
+  PermissionContext,
+  PermissionDecision,
+} from '@moxxy/sdk';
 import { runTurn, type Session } from '@moxxy/core';
 import { ChatView } from './components/ChatView.js';
 import { PromptInput } from './components/PromptInput.js';
 import { PermissionDialog } from './components/PermissionDialog.js';
+import { ApprovalDialog } from './components/ApprovalDialog.js';
 import { StatusBar } from './components/StatusBar.js';
 import { Spinner } from './components/Spinner.js';
 import { Logo } from './components/Logo.js';
 import { SessionInfo } from './components/SessionInfo.js';
+import { SkillsPanel } from './components/SkillsPanel.js';
+import { ToolsPanel } from './components/ToolsPanel.js';
 import { BUILTIN_SLASH_COMMANDS } from './components/SlashCommands.js';
 import { ListPicker, type ListPickerOption } from './components/ListPicker.js';
 import { estimateContextTokens } from './context-estimate.js';
+import { savePreferences } from '@moxxy/core';
 
 export interface InteractiveSessionProps {
   readonly session: Session;
@@ -19,18 +30,38 @@ export interface InteractiveSessionProps {
     prompt: (call: PendingToolCall, ctx: PermissionContext) => Promise<PermissionDecision>,
   ) => void;
   readonly model?: string;
+  /**
+   * Optional version string surfaced in the logo + session-info panel.
+   * Source of truth: `@moxxy/cli`'s package.json — the bin resolves it
+   * at boot and passes it down (avoids putting fs reads in the TUI).
+   */
+  readonly version?: string;
 }
 
 export const InteractiveSession: React.FC<InteractiveSessionProps> = ({
   session,
   registerInteractiveResolver,
   model,
+  version,
 }) => {
   const { exit } = useApp();
   const [events, setEvents] = useState<ReadonlyArray<MoxxyEvent>>([]);
   const [streamingDelta, setStreamingDelta] = useState('');
   const [busy, setBusy] = useState(false);
   const [systemNotice, setSystemNotice] = useState<string | null>(null);
+  // Structured ephemeral overlay (mutually exclusive with systemNotice).
+  // /skills and /tools render through here so they get full-color
+  // typography instead of being squeezed into the yellow notice strip.
+  const [overlay, setOverlay] = useState<
+    | { kind: 'skills' }
+    | { kind: 'tools' }
+    | null
+  >(null);
+  // When true, closed skill scopes render expanded (children visible).
+  // Default false = collapsed summary. Toggled by /expand and /collapse.
+  // In-flight scopes ignore this flag and always render expanded so the
+  // user can watch tools execute live.
+  const [expandSkills, setExpandSkills] = useState(false);
   const [yolo, setYolo] = useState(false);
   const yoloRef = useRef(false);
   // Mid-session model override. When the user picks a model via /model,
@@ -44,6 +75,14 @@ export const InteractiveSession: React.FC<InteractiveSessionProps> = ({
     call: PendingToolCall;
     ctx: PermissionContext;
     resolve: (d: PermissionDecision) => void;
+  } | null>(null);
+  // Generic approval queue. Loop strategies push checkpoint questions
+  // here via the resolver we install on the Session; the dialog drains
+  // it one at a time. Same shape as pendingPermission — single
+  // outstanding question with an inline resolve closure.
+  const [pendingApproval, setPendingApproval] = useState<{
+    request: ApprovalRequest;
+    resolve: (d: ApprovalDecision) => void;
   } | null>(null);
   const streamingBufferRef = useRef('');
   // Per-turn abort controller. Esc while busy aborts THIS turn without
@@ -81,7 +120,22 @@ export const InteractiveSession: React.FC<InteractiveSessionProps> = ({
       });
     });
 
-    return () => unsub();
+    // Install a generic approval resolver so loop strategies that opt
+    // into ctx.approval (plan-execute, future strategies) get a TUI
+    // checkpoint dialog. Tears down on unmount so headless tests don't
+    // accidentally inherit a dialog-bound resolver.
+    session.setApprovalResolver({
+      name: 'tui-approval',
+      confirm: (request) =>
+        new Promise<ApprovalDecision>((resolve) => {
+          setPendingApproval({ request, resolve });
+        }),
+    });
+
+    return () => {
+      unsub();
+      session.setApprovalResolver(null);
+    };
   }, [session, registerInteractiveResolver]);
 
   // While the model is running, Esc / Ctrl+C cancels the turn. The
@@ -103,6 +157,25 @@ export const InteractiveSession: React.FC<InteractiveSessionProps> = ({
     },
     { isActive: busy },
   );
+
+  // Always-on Ctrl+B handler: toggle global skill-scope expand/collapse.
+  // Lives outside the busy gate so the hotkey works both while typing
+  // and while a turn is in flight. PromptInput's useInput doesn't
+  // intercept Ctrl+B (it gates printable input on !key.ctrl), so the
+  // keystroke passes through cleanly.
+  useInput((input, key) => {
+    if (key.ctrl && input === 'b') {
+      setExpandSkills((e) => {
+        const next = !e;
+        setSystemNotice(
+          next
+            ? 'skill scopes expanded — Ctrl+B again to collapse'
+            : 'skill scopes collapsed — Ctrl+B again to expand',
+        );
+        return next;
+      });
+    }
+  });
 
   // Snapshot the session's stable session metadata for the header table.
   const providerName = session.providers.getActiveName() ?? '(none)';
@@ -156,6 +229,9 @@ export const InteractiveSession: React.FC<InteractiveSessionProps> = ({
         }
         setActiveModelOverride(modelId);
         setSystemNotice(`switched to ${providerId}:${modelId}`);
+        // Persist so this choice survives across CLI invocations. Failure
+        // to write is non-fatal: the pick still applies this session.
+        void savePreferences({ providerName: providerId, model: modelId });
       } catch (err) {
         setSystemNotice(
           `failed to switch: ${err instanceof Error ? err.message : String(err)}`,
@@ -167,6 +243,7 @@ export const InteractiveSession: React.FC<InteractiveSessionProps> = ({
       try {
         session.loops.setActive(id);
         setSystemNotice(`loop strategy → ${id}`);
+        void savePreferences({ loopStrategy: id });
       } catch (err) {
         setSystemNotice(
           `failed to switch loop: ${err instanceof Error ? err.message : String(err)}`,
@@ -189,21 +266,43 @@ export const InteractiveSession: React.FC<InteractiveSessionProps> = ({
         streamingBufferRef.current = '';
         setSystemNotice('chat scrollback cleared (events still in the log)');
         return;
+      case '/new': {
+        // Hard reset: abort any in-flight turn, wipe the underlying
+        // event log so the next prompt starts with empty conversation
+        // context, and drop every UI overlay. Active provider/model/
+        // loop are preserved — those are user choices, not session
+        // state. YOLO is reset to its safe default (off) because it's
+        // a per-session safety toggle; conversation memory ending
+        // shouldn't carry an auto-approve flag forward implicitly.
+        const ctrl = turnControllerRef.current;
+        if (ctrl && !ctrl.signal.aborted) ctrl.abort('user reset');
+        session.log.clear();
+        setEvents([]);
+        setStreamingDelta('');
+        streamingBufferRef.current = '';
+        setOverlay(null);
+        setPendingPermission(null);
+        setPendingApproval(null);
+        setBusy(false);
+        setYolo(false);
+        setSystemNotice('new session — conversation history cleared');
+        return;
+      }
       case '/tools':
-        setSystemNotice(
-          session.tools
-            .list()
-            .map((t) => `${t.name}  — ${t.description}`)
-            .join('\n') || '(no tools registered)',
-        );
+        setSystemNotice(null);
+        setOverlay({ kind: 'tools' });
         return;
       case '/skills':
-        setSystemNotice(
-          session.skills
-            .list()
-            .map((s) => `${s.frontmatter.name}  — ${s.frontmatter.description}`)
-            .join('\n') || '(no skills discovered)',
-        );
+        setSystemNotice(null);
+        setOverlay({ kind: 'skills' });
+        return;
+      case '/expand':
+        setExpandSkills(true);
+        setSystemNotice('skill scopes expanded (use /collapse to re-collapse)');
+        return;
+      case '/collapse':
+        setExpandSkills(false);
+        setSystemNotice('skill scopes collapsed');
         return;
       case '/model': {
         // Build a flat list of all (provider, model) pairs across every
@@ -272,6 +371,7 @@ export const InteractiveSession: React.FC<InteractiveSessionProps> = ({
 
   const handleSubmit = async (text: string): Promise<void> => {
     setSystemNotice(null);
+    setOverlay(null);
     if (text.startsWith('/')) {
       runSlash(text);
       return;
@@ -302,18 +402,25 @@ export const InteractiveSession: React.FC<InteractiveSessionProps> = ({
 
   return (
     <Box flexDirection="column">
-      <Logo />
+      <Logo {...(version ? { version } : {})} />
       <SessionInfo
         loop={loopName}
+        provider={providerName}
+        model={activeModel}
         toolCount={toolCount}
         skillCount={skillCount}
         pluginCount={pluginCount}
+        {...(version ? { version: `v${version}` } : {})}
       />
       <Box>
         <Text dimColor>type / for commands · /exit to quit</Text>
       </Box>
-      <ChatView events={events} streamingDelta={streamingDelta} />
-      {systemNotice ? (
+      <ChatView events={events} streamingDelta={streamingDelta} expandClosedSkills={expandSkills} />
+      {overlay?.kind === 'skills' ? (
+        <SkillsPanel skills={session.skills.list()} />
+      ) : overlay?.kind === 'tools' ? (
+        <ToolsPanel tools={session.tools.list()} />
+      ) : systemNotice ? (
         <Box marginTop={1} marginBottom={1} flexDirection="column">
           {systemNotice.split('\n').map((line, i) => (
             <Text key={i} color="yellow">{line}</Text>
@@ -325,7 +432,7 @@ export const InteractiveSession: React.FC<InteractiveSessionProps> = ({
           last tool/assistant block rather than floating in its own
           padded region. Hidden while the dialog is up — the dialog
           itself signals "waiting on you." */}
-      {busy && !pendingPermission ? (
+      {busy && !pendingPermission && !pendingApproval ? (
         <Box>
           <Spinner label="thinking…  (esc to cancel)" color="yellow" />
         </Box>
@@ -342,6 +449,15 @@ export const InteractiveSession: React.FC<InteractiveSessionProps> = ({
                 .addAllow({ name: call.name, reason: 'allow_always via TUI dialog' })
                 .catch(() => undefined);
             }
+            resolve(decision);
+          }}
+        />
+      ) : pendingApproval ? (
+        <ApprovalDialog
+          request={pendingApproval.request}
+          onDecide={(decision) => {
+            const { resolve } = pendingApproval;
+            setPendingApproval(null);
             resolve(decision);
           }}
         />

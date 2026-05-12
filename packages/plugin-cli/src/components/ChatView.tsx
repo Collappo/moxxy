@@ -1,11 +1,24 @@
 import React from 'react';
 import { Box, Text } from 'ink';
-import type { MoxxyEvent, ToolCallRequestedEvent, ToolResultEvent } from '@moxxy/sdk';
+import type {
+  MoxxyEvent,
+  SkillInvokedEvent,
+  ToolCallRequestedEvent,
+  ToolResultEvent,
+} from '@moxxy/sdk';
 import { Markdown } from './Markdown.js';
 
 export interface ChatViewProps {
   readonly events: ReadonlyArray<MoxxyEvent>;
   readonly streamingDelta?: string;
+  /**
+   * Override the per-skill expansion default. When `true`, every closed
+   * skill scope renders expanded (children visible); when `false`, all
+   * closed scopes collapse to a one-line summary. Defaults to false
+   * (closed scopes collapse) — in-flight scopes ignore this and always
+   * render expanded so the user can watch tools execute live.
+   */
+  readonly expandClosedSkills?: boolean;
 }
 
 /**
@@ -18,12 +31,16 @@ export interface ChatViewProps {
  *
  * Matches the visual rhythm of Claude Code's tool-use rendering.
  */
-export const ChatView: React.FC<ChatViewProps> = ({ events, streamingDelta }) => {
+export const ChatView: React.FC<ChatViewProps> = ({
+  events,
+  streamingDelta,
+  expandClosedSkills,
+}) => {
   const blocks = pairToolEvents(events);
   return (
     <Box flexDirection="column">
       {blocks.map((b) => (
-        <BlockLine key={b.id} block={b} />
+        <BlockLine key={b.id} block={b} expandClosedSkills={!!expandClosedSkills} />
       ))}
       {streamingDelta ? <AssistantBlock content={streamingDelta} /> : null}
     </Box>
@@ -52,55 +69,193 @@ const AssistantBlock: React.FC<{ content: string }> = ({ content }) => (
   </Box>
 );
 
-type Block =
-  | { kind: 'event'; id: string; event: MoxxyEvent }
-  | {
-      kind: 'tool-call';
-      id: string;
-      request: ToolCallRequestedEvent;
-      outcome: ToolResultEvent | { type: 'denied'; reason: string } | null;
-    };
+type Block = EventBlock | ToolCallBlockData | SkillScopeBlock;
+
+interface EventBlock {
+  readonly kind: 'event';
+  readonly id: string;
+  readonly event: MoxxyEvent;
+}
+
+interface ToolCallBlockData {
+  kind: 'tool-call';
+  readonly id: string;
+  readonly request: ToolCallRequestedEvent;
+  outcome: ToolResultEvent | { type: 'denied'; reason: string } | null;
+}
+
+interface SkillScopeBlock {
+  kind: 'skill-scope';
+  readonly id: string;
+  readonly skillEvent: SkillInvokedEvent;
+  children: Block[];
+  /**
+   * A scope is "closed" once the turn ends (another user_prompt arrives
+   * after it). Closed scopes collapse to a one-line summary by default;
+   * in-flight scopes render expanded so the user can watch tools run.
+   */
+  closed: boolean;
+}
 
 function pairToolEvents(events: ReadonlyArray<MoxxyEvent>): Block[] {
-  const blocks: Block[] = [];
-  const callIndex = new Map<string, number>();
+  const root: Block[] = [];
+  // Reverse lookup: callId → the tool-call block currently waiting on a
+  // result/denied event. Lookup works whether the block sits in `root`
+  // or inside an open skill scope.
+  const callBlocks = new Map<string, ToolCallBlockData>();
+  const suppressedCallIds = new Set<string>();
+  let pendingLoadSkillCallId: string | null = null;
+  // Active skill scope (children get pushed here instead of root).
+  let openScope: SkillScopeBlock | null = null;
+
+  const pushBlock = (block: Block): void => {
+    if (openScope) {
+      openScope.children.push(block);
+    } else {
+      root.push(block);
+    }
+  };
+
+  const closeOpenScope = (): void => {
+    if (openScope) {
+      openScope.closed = true;
+      openScope = null;
+    }
+  };
+
+  // When a load_skill call has been pushed but the corresponding
+  // skill_invoked hasn't arrived yet, we need to find and remove it
+  // from wherever it landed (root or the previous scope's children).
+  const removeBlockByCallId = (callId: string): void => {
+    const removeFrom = (list: Block[]): boolean => {
+      const idx = list.findIndex((b) => b.kind === 'tool-call' && b.request.callId === callId);
+      if (idx >= 0) {
+        list.splice(idx, 1);
+        return true;
+      }
+      return false;
+    };
+    if (openScope && removeFrom(openScope.children)) return;
+    removeFrom(root);
+  };
+
   for (const e of events) {
+    if (e.type === 'user_prompt') {
+      closeOpenScope();
+      pendingLoadSkillCallId = null;
+      root.push({ kind: 'event', id: e.id, event: e });
+      continue;
+    }
+    if (e.type === 'skill_invoked') {
+      // Close any previous scope, then open a new one. Also collapse
+      // the load_skill tool-call into the new scope so we don't show
+      // both "load_skill(name=foo)" AND "◆ skill: foo".
+      closeOpenScope();
+      if (pendingLoadSkillCallId) {
+        suppressedCallIds.add(pendingLoadSkillCallId);
+        removeBlockByCallId(pendingLoadSkillCallId);
+        pendingLoadSkillCallId = null;
+      }
+      openScope = {
+        kind: 'skill-scope',
+        id: e.id,
+        skillEvent: e,
+        children: [],
+        closed: false,
+      };
+      root.push(openScope);
+      continue;
+    }
     if (e.type === 'tool_call_requested') {
-      const block: Block = { kind: 'tool-call', id: e.id, request: e, outcome: null };
-      callIndex.set(e.callId, blocks.length);
-      blocks.push(block);
+      if (e.name === 'load_skill') {
+        pendingLoadSkillCallId = e.callId;
+      }
+      const block: ToolCallBlockData = {
+        kind: 'tool-call',
+        id: e.id,
+        request: e,
+        outcome: null,
+      };
+      callBlocks.set(e.callId, block);
+      pushBlock(block);
       continue;
     }
     if (e.type === 'tool_result') {
-      const idx = callIndex.get(e.callId);
-      if (idx !== undefined) {
-        const block = blocks[idx]!;
-        if (block.kind === 'tool-call') block.outcome = e;
+      if (suppressedCallIds.has(e.callId)) continue;
+      const block = callBlocks.get(e.callId);
+      if (block) {
+        block.outcome = e;
         continue;
       }
     }
     if (e.type === 'tool_call_denied') {
-      const idx = callIndex.get(e.callId);
-      if (idx !== undefined) {
-        const block = blocks[idx]!;
-        if (block.kind === 'tool-call') block.outcome = { type: 'denied', reason: e.reason };
+      if (suppressedCallIds.has(e.callId)) continue;
+      const block = callBlocks.get(e.callId);
+      if (block) {
+        block.outcome = { type: 'denied', reason: e.reason };
         continue;
       }
     }
     if (e.type === 'tool_call_approved') {
-      // Approved events are noise next to the result — the outcome block
-      // already conveys the same information.
-      continue;
+      continue; // outcome already conveys this
     }
-    blocks.push({ kind: 'event', id: e.id, event: e });
+    pushBlock({ kind: 'event', id: e.id, event: e });
   }
-  return blocks;
+  return root;
 }
 
-const BlockLine: React.FC<{ block: Block }> = ({ block }) => {
+const BlockLine: React.FC<{ block: Block; expandClosedSkills: boolean }> = ({
+  block,
+  expandClosedSkills,
+}) => {
   if (block.kind === 'event') return <EventLine event={block.event} />;
-  return <ToolCallBlock request={block.request} outcome={block.outcome} />;
+  if (block.kind === 'tool-call') {
+    return <ToolCallBlock request={block.request} outcome={block.outcome} />;
+  }
+  return <SkillScopeView scope={block} expandClosedSkills={expandClosedSkills} />;
 };
+
+const SkillScopeView: React.FC<{ scope: SkillScopeBlock; expandClosedSkills: boolean }> = ({
+  scope,
+  expandClosedSkills,
+}) => {
+  const childToolCount = countToolCalls(scope.children);
+  const isExpanded = !scope.closed || expandClosedSkills;
+  return (
+    <Box flexDirection="column" marginTop={1}>
+      <Box>
+        <Text color="magenta" bold>
+          {isExpanded ? '▾ ' : '▸ '}
+        </Text>
+        <Text color="magenta" bold>
+          skill
+        </Text>
+        <Text dimColor>:</Text>
+        <Text bold>{` ${scope.skillEvent.name}`}</Text>
+        <Text dimColor>{`  ·  ${childToolCount} tool call${childToolCount === 1 ? '' : 's'}`}</Text>
+        {scope.closed && !expandClosedSkills ? (
+          <Text dimColor italic>{'  (collapsed)'}</Text>
+        ) : null}
+      </Box>
+      {isExpanded ? (
+        <Box flexDirection="column" marginLeft={2}>
+          {scope.children.map((c) => (
+            <BlockLine key={c.id} block={c} expandClosedSkills={expandClosedSkills} />
+          ))}
+        </Box>
+      ) : null}
+    </Box>
+  );
+};
+
+function countToolCalls(blocks: ReadonlyArray<Block>): number {
+  let n = 0;
+  for (const b of blocks) {
+    if (b.kind === 'tool-call') n += 1;
+    else if (b.kind === 'skill-scope') n += countToolCalls(b.children);
+  }
+  return n;
+}
 
 const ToolCallBlock: React.FC<{
   request: ToolCallRequestedEvent;
@@ -148,27 +303,42 @@ const OutcomeText: React.FC<{
       </Text>
     );
   }
-  const preview = stringify(outcome.output);
-  return <Text dimColor>{truncate(preview, 120)}</Text>;
+  const preview = oneLine(stringify(outcome.output));
+  return <Text dimColor>{truncate(preview, 100)}</Text>;
 };
+
+// Hard cap on the full argument-summary string. Joining lots of fields
+// (especially MCP tools with `query`, `user_intent`, `design_type`, …)
+// produces a multi-line wrap that dwarfs the rest of the chat. Cap at
+// one terminal line worth and let the model's full input live in the
+// event log if anyone wants the gory detail.
+const ARG_SUMMARY_MAX = 90;
+const VALUE_MAX = 28;
 
 function summarizeArgs(input: unknown): string {
   if (input == null) return '';
-  if (typeof input === 'string') return truncate(input, 60);
+  if (typeof input === 'string') return truncate(oneLine(input), 60);
   if (typeof input !== 'object') return String(input);
   const entries = Object.entries(input as Record<string, unknown>);
   if (entries.length === 0) return '';
-  return entries.map(([k, v]) => `${k}=${formatValue(v)}`).join(', ');
+  const joined = entries.map(([k, v]) => `${k}=${formatValue(v)}`).join(', ');
+  return truncate(oneLine(joined), ARG_SUMMARY_MAX);
 }
 
 function formatValue(v: unknown): string {
-  if (typeof v === 'string') return JSON.stringify(truncate(v, 40));
+  if (typeof v === 'string') return JSON.stringify(truncate(oneLine(v), VALUE_MAX));
   if (typeof v === 'number' || typeof v === 'boolean' || v === null) return String(v);
   try {
-    return truncate(JSON.stringify(v), 40);
+    return truncate(oneLine(JSON.stringify(v)), VALUE_MAX);
   } catch {
     return '[…]';
   }
+}
+
+/** Replace newlines + tabs with a single space so multi-line values
+ *  don't wrap the tool-call header across many rows. */
+function oneLine(s: string): string {
+  return s.replace(/[\r\n\t]+/g, ' ').replace(/  +/g, ' ').trim();
 }
 
 const EventLine: React.FC<{ event: MoxxyEvent }> = ({ event }) => {
@@ -185,6 +355,10 @@ const EventLine: React.FC<{ event: MoxxyEvent }> = ({ event }) => {
       );
     case 'assistant_message':
       return <AssistantBlock content={event.content} />;
+    case 'skill_invoked':
+      // SkillScopeView owns this render; if we reach here it means the
+      // event escaped grouping (defensive fallback only).
+      return null;
     case 'skill_created':
       return (
         <Box marginTop={1}>
