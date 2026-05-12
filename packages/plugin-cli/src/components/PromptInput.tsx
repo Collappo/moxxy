@@ -104,7 +104,21 @@ export const PromptInput: React.FC<PromptInputProps> = ({
 
   return (
     <Box flexDirection="column">
-      <Box flexDirection="column">
+      {/* Wrap the input lines in horizontal rules so the buffer reads as
+          a clear "input box" — Ink draws single-line borders on the top
+          and bottom edges only via per-edge border flags. Color stays
+          gray + dim so the chrome doesn't compete with the cursor. */}
+      <Box
+        flexDirection="column"
+        borderStyle="single"
+        borderColor="gray"
+        borderDimColor
+        borderTop
+        borderBottom
+        borderLeft={false}
+        borderRight={false}
+        paddingY={0}
+      >
         {lines.map((line, i) => {
           const prefix =
             i === 0
