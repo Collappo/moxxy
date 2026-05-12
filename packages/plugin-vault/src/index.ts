@@ -4,7 +4,7 @@ import { z, defineTool, definePlugin, type Plugin } from '@moxxy/sdk';
 import { createCombinedKeySource, type MasterKeySource } from './keysource.js';
 import { VaultStore } from './store.js';
 
-export { VaultStore } from './store.js';
+export { VaultStore, VaultPassphraseError } from './store.js';
 export type { VaultEntry, VaultEntryInfo, VaultStoreOptions } from './store.js';
 export { createCombinedKeySource, createStaticKeySource, type MasterKeySource } from './keysource.js';
 export { resolveString, resolveValue, containsPlaceholder } from './placeholder.js';

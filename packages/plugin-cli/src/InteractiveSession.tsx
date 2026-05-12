@@ -7,6 +7,7 @@ import { PromptInput } from './components/PromptInput.js';
 import { PermissionDialog } from './components/PermissionDialog.js';
 import { StatusBar } from './components/StatusBar.js';
 import { Spinner } from './components/Spinner.js';
+import { Logo } from './components/Logo.js';
 import { BUILTIN_SLASH_COMMANDS } from './components/SlashCommands.js';
 
 export interface InteractiveSessionProps {
@@ -67,8 +68,6 @@ export const InteractiveSession: React.FC<InteractiveSessionProps> = ({
         return 'default';
       }
     })();
-  const toolCount = session.tools.list().length;
-  const skillCount = session.skills.list().length;
 
   const runSlash = (cmd: string): void => {
     const [head] = cmd.split(/\s+/);
@@ -137,10 +136,7 @@ export const InteractiveSession: React.FC<InteractiveSessionProps> = ({
 
   return (
     <Box flexDirection="column">
-      <Box marginBottom={1}>
-        <Text bold color="magenta">moxxy</Text>
-        <Text dimColor> — type / for commands · /exit to quit</Text>
-      </Box>
+      <Logo subtitle="type / for commands · /exit to quit" />
       <ChatView events={events} streamingDelta={streamingDelta} />
       {systemNotice ? (
         <Box marginTop={1} marginBottom={1} flexDirection="column">
@@ -171,14 +167,7 @@ export const InteractiveSession: React.FC<InteractiveSessionProps> = ({
           placeholder={busy ? '' : 'type a prompt or / for commands'}
         />
       )}
-      <StatusBar
-        model={activeModel}
-        provider={providerName}
-        toolCount={toolCount}
-        skillCount={skillCount}
-        cwd={session.cwd}
-        busy={busy}
-      />
+      <StatusBar model={activeModel} provider={providerName} busy={busy} />
     </Box>
   );
 };

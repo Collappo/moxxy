@@ -1,3 +1,6 @@
+import { promises as fs } from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import { deriveKey } from './crypto.js';
 
 const KEYTAR_SERVICE = 'moxxy';
@@ -15,15 +18,39 @@ export interface CombinedKeySourceOptions {
   readonly passphrasePrompt: () => Promise<string>;
   readonly envVar?: string;
   readonly disableKeytar?: boolean;
+  /**
+   * Disk fallback for the master key, used when keytar isn't installed
+   * or refuses to bind to a keychain (common on headless Linux). Stored
+   * as base64 at this path with mode 0o600 — less secure than the OS
+   * keychain, but means the user types their passphrase ONCE instead of
+   * every run. Set to false to disable.
+   *
+   * Default: `~/.moxxy/vault.key`.
+   */
+  readonly diskKeyPath?: string | false;
 }
 
 /**
- * Tries OS keychain via keytar first; falls back to env var, then to an
- * interactive passphrase prompt. The chosen source's name is exposed so
- * callers can surface it ("vault unlocked via macOS Keychain", etc).
+ * Resolves the vault master key in priority order:
+ *   1. `MOXXY_VAULT_PASSPHRASE` env var (derive on each call — no persistence).
+ *   2. OS keychain via keytar.
+ *   3. On-disk cached key at `~/.moxxy/vault.key` (mode 0600).
+ *   4. Interactive passphrase prompt.
+ *
+ * The first successful prompt persists the derived key to BOTH keytar (if
+ * available) and the disk cache so subsequent runs are silent. The chosen
+ * source's name is exposed via `.name` so `moxxy doctor` can surface it
+ * ("vault unlocked via keytar" / "via ~/.moxxy/vault.key").
  */
 export function createCombinedKeySource(opts: CombinedKeySourceOptions): MasterKeySource {
   let resolvedName = 'unknown';
+  const diskPath = resolveDiskPath(opts.diskKeyPath);
+
+  const persistKey = async (keyB64: string): Promise<void> => {
+    if (!opts.disableKeytar) await tryKeytarSet(keyB64);
+    if (diskPath) await tryDiskSet(diskPath, keyB64);
+  };
+
   return {
     get name() {
       return resolvedName;
@@ -40,20 +67,57 @@ export function createCombinedKeySource(opts: CombinedKeySourceOptions): MasterK
         const fromKeychain = await tryKeytarGet();
         if (fromKeychain) {
           resolvedName = 'keytar';
+          // Backfill the disk cache so a future keytar outage doesn't
+          // suddenly force a passphrase prompt.
+          if (diskPath) void tryDiskSet(diskPath, fromKeychain);
           return Buffer.from(fromKeychain, 'base64');
+        }
+      }
+
+      if (diskPath) {
+        const fromDisk = await tryDiskGet(diskPath);
+        if (fromDisk) {
+          resolvedName = `file:${diskPath}`;
+          // Backfill keytar if it became available since the file was written.
+          if (!opts.disableKeytar) void tryKeytarSet(fromDisk);
+          return Buffer.from(fromDisk, 'base64');
         }
       }
 
       const passphrase = await opts.passphrasePrompt();
       resolvedName = 'passphrase';
       const key = deriveKey(passphrase, salt);
-      if (!opts.disableKeytar) await tryKeytarSet(key.toString('base64'));
+      await persistKey(key.toString('base64'));
       return key;
     },
     async persist(key) {
-      if (!opts.disableKeytar) await tryKeytarSet(key.toString('base64'));
+      await persistKey(key.toString('base64'));
     },
   };
+}
+
+function resolveDiskPath(supplied: string | false | undefined): string | null {
+  if (supplied === false) return null;
+  if (typeof supplied === 'string') return supplied;
+  return path.join(os.homedir(), '.moxxy', 'vault.key');
+}
+
+async function tryDiskGet(filePath: string): Promise<string | null> {
+  try {
+    const raw = await fs.readFile(filePath, 'utf8');
+    return raw.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+async function tryDiskSet(filePath: string, value: string): Promise<void> {
+  try {
+    await fs.mkdir(path.dirname(filePath), { recursive: true });
+    await fs.writeFile(filePath, value + '\n', { mode: 0o600 });
+  } catch {
+    // Best-effort; if we can't write, the next run will just re-prompt.
+  }
 }
 
 async function tryKeytarGet(): Promise<string | null> {

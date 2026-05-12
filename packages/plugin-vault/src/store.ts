@@ -8,6 +8,37 @@ interface VaultFile {
   readonly kdf: 'scrypt';
   readonly salt: string;
   readonly entries: Record<string, VaultEntry>;
+  /**
+   * Known-plaintext probe encrypted with the master key. On open(), we
+   * decrypt this to verify the user-supplied passphrase matches the one
+   * used to create the file — otherwise the next `get()` would throw a
+   * cryptic AES-GCM auth-tag error.
+   *
+   * Optional for backward compatibility: a vault written by an older
+   * version of this code won't have it, in which case we fall back to
+   * probing the first real entry (if any).
+   */
+  readonly canary?: EncryptedBlob;
+}
+
+const CANARY_PLAINTEXT = 'moxxy:vault:v1';
+
+/**
+ * Thrown when the supplied passphrase doesn't match the stored vault.
+ * Surfaced to the user with a recovery hint instead of the raw AES-GCM
+ * "Unsupported state or unable to authenticate data" error.
+ */
+export class VaultPassphraseError extends Error {
+  constructor(public readonly filePath: string) {
+    super(
+      `Wrong vault passphrase for ${filePath}.\n` +
+        `  If you've forgotten it, wipe the vault and key cache, then re-run \`moxxy init\`:\n` +
+        `    rm ${filePath} ~/.moxxy/vault.key\n` +
+        `  (If keytar is installed, also clear the entry: \`security delete-generic-password -s moxxy\` on macOS.)\n` +
+        `  Or set MOXXY_VAULT_PASSPHRASE to a known value to skip the prompt entirely.`,
+    );
+    this.name = 'VaultPassphraseError';
+  }
 }
 
 export interface VaultEntry extends EncryptedBlob {
@@ -66,7 +97,13 @@ export class VaultStore {
     if (raw === null) {
       const salt = generateSalt();
       this.masterKey = await this.keySource.obtain(salt);
-      this.file = { version: 1, kdf: 'scrypt', salt: salt.toString('base64'), entries: {} };
+      this.file = {
+        version: 1,
+        kdf: 'scrypt',
+        salt: salt.toString('base64'),
+        entries: {},
+        canary: encrypt(CANARY_PLAINTEXT, this.masterKey),
+      };
       await this.persist();
       return;
     }
@@ -77,6 +114,38 @@ export class VaultStore {
     this.file = parsed;
     const salt = Buffer.from(parsed.salt, 'base64');
     this.masterKey = await this.keySource.obtain(salt);
+    this.verifyPassphrase();
+    // Backfill the canary on the first successful open of a legacy vault.
+    if (!this.file.canary) {
+      this.file = { ...this.file, canary: encrypt(CANARY_PLAINTEXT, this.masterKey) };
+      try {
+        await this.persist();
+      } catch {
+        // Best-effort — failing to backfill doesn't break the open.
+      }
+    }
+  }
+
+  /**
+   * Confirm the master key decrypts the file's canary (or, for legacy
+   * vaults without a canary, the first stored entry). On mismatch throw
+   * a friendly `VaultPassphraseError` rather than letting the cryptic
+   * "Unsupported state or unable to authenticate data" error from
+   * Node's AES-GCM bubble up later.
+   */
+  private verifyPassphrase(): void {
+    if (!this.file || !this.masterKey) return;
+    const probe = this.file.canary ?? firstEntry(this.file.entries);
+    if (!probe) return; // empty legacy vault — nothing to verify yet.
+    try {
+      const plaintext = decrypt(probe, this.masterKey);
+      if (this.file.canary && plaintext !== CANARY_PLAINTEXT) {
+        throw new VaultPassphraseError(this.filePath);
+      }
+    } catch (err) {
+      if (err instanceof VaultPassphraseError) throw err;
+      throw new VaultPassphraseError(this.filePath);
+    }
   }
 
   /**
@@ -164,4 +233,11 @@ export class VaultStore {
 
 function isEnoent(err: unknown): boolean {
   return err instanceof Error && 'code' in err && (err as NodeJS.ErrnoException).code === 'ENOENT';
+}
+
+function firstEntry(entries: Record<string, VaultEntry>): VaultEntry | undefined {
+  for (const key of Object.keys(entries)) {
+    return entries[key];
+  }
+  return undefined;
 }

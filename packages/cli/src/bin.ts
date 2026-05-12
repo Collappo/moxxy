@@ -102,6 +102,12 @@ async function main(): Promise<number> {
 main().then(
   (code) => process.exit(code),
   (err) => {
+    // Surface specific user-actionable errors without the scary "fatal:" prefix.
+    // VaultPassphraseError already contains a recovery hint in its message.
+    if (err && (err as Error).name === 'VaultPassphraseError') {
+      process.stderr.write(colors.red((err as Error).message) + '\n');
+      process.exit(1);
+    }
     process.stderr.write(
       colors.red('fatal: ') + (err instanceof Error ? err.message : String(err)) + '\n',
     );
