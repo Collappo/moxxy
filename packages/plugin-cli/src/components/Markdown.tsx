@@ -11,12 +11,23 @@ import { Box, Text } from 'ink';
  * regex transforms. Good-enough is the right bar here — the chat is
  * ephemeral, the user will catch any rendering edge case visually.
  */
-export const Markdown: React.FC<{ content: string }> = ({ content }) => {
+export interface MarkdownProps {
+  readonly content: string;
+  /**
+   * When true, the first block's `marginTop` is suppressed. Used by
+   * AssistantBlock so the response body sits flush with the bullet on
+   * the same row, even when the body starts with a heading (which
+   * would otherwise push the text down one line).
+   */
+  readonly firstBlockTight?: boolean;
+}
+
+export const Markdown: React.FC<MarkdownProps> = ({ content, firstBlockTight }) => {
   const blocks = parseBlocks(content);
   return (
     <Box flexDirection="column">
       {blocks.map((b, i) => (
-        <BlockNode key={i} block={b} />
+        <BlockNode key={i} block={b} suppressTopMargin={firstBlockTight && i === 0} />
       ))}
     </Box>
   );
@@ -103,12 +114,16 @@ function parseBlocks(src: string): Block[] {
   return blocks;
 }
 
-const BlockNode: React.FC<{ block: Block }> = ({ block }) => {
+const BlockNode: React.FC<{ block: Block; suppressTopMargin?: boolean }> = ({
+  block,
+  suppressTopMargin,
+}) => {
   switch (block.kind) {
     case 'heading': {
       const color = block.level === 1 ? 'cyan' : block.level === 2 ? 'magenta' : 'yellow';
+      const mt = suppressTopMargin ? 0 : block.level <= 2 ? 1 : 0;
       return (
-        <Box marginTop={block.level <= 2 ? 1 : 0}>
+        <Box marginTop={mt}>
           <Text bold color={color}>{'#'.repeat(block.level)} </Text>
           <Text bold color={color}>{block.text}</Text>
         </Box>

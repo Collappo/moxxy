@@ -10,6 +10,7 @@ import { Spinner } from './components/Spinner.js';
 import { Logo } from './components/Logo.js';
 import { SessionInfo } from './components/SessionInfo.js';
 import { BUILTIN_SLASH_COMMANDS } from './components/SlashCommands.js';
+import { ListPicker, type ListPickerOption } from './components/ListPicker.js';
 import { estimateContextTokens } from './context-estimate.js';
 
 export interface InteractiveSessionProps {
@@ -32,6 +33,13 @@ export const InteractiveSession: React.FC<InteractiveSessionProps> = ({
   const [systemNotice, setSystemNotice] = useState<string | null>(null);
   const [yolo, setYolo] = useState(false);
   const yoloRef = useRef(false);
+  // Mid-session model override. When the user picks a model via /model,
+  // this takes precedence over the prop passed in at mount time.
+  const [activeModelOverride, setActiveModelOverride] = useState<string | null>(null);
+  const [picker, setPicker] = useState<
+    | null
+    | { kind: 'model' | 'loop'; title: string; options: ReadonlyArray<ListPickerOption> }
+  >(null);
   const [pendingPermission, setPendingPermission] = useState<{
     call: PendingToolCall;
     ctx: PermissionContext;
@@ -75,6 +83,7 @@ export const InteractiveSession: React.FC<InteractiveSessionProps> = ({
   // Snapshot the session's stable session metadata for the header table.
   const providerName = session.providers.getActiveName() ?? '(none)';
   const activeModel =
+    activeModelOverride ??
     model ?? (() => {
       try {
         return session.providers.getActive().models[0]?.id ?? 'default';
@@ -110,6 +119,38 @@ export const InteractiveSession: React.FC<InteractiveSessionProps> = ({
   const skillCount = session.skills.list().length;
   const pluginCount = session.pluginHost.list().length;
 
+  const handlePickerSelect = (id: string): void => {
+    if (!picker) return;
+    const kind = picker.kind;
+    setPicker(null);
+    if (kind === 'model') {
+      const [providerId, modelId] = id.split('::');
+      if (!providerId || !modelId) return;
+      try {
+        if (providerId !== providerName) {
+          session.providers.setActive(providerId);
+        }
+        setActiveModelOverride(modelId);
+        setSystemNotice(`switched to ${providerId}:${modelId}`);
+      } catch (err) {
+        setSystemNotice(
+          `failed to switch: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+      return;
+    }
+    if (kind === 'loop') {
+      try {
+        session.loops.setActive(id);
+        setSystemNotice(`loop strategy → ${id}`);
+      } catch (err) {
+        setSystemNotice(
+          `failed to switch loop: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+  };
+
   const runSlash = (cmd: string): void => {
     const [head] = cmd.split(/\s+/);
     switch (head) {
@@ -140,9 +181,48 @@ export const InteractiveSession: React.FC<InteractiveSessionProps> = ({
             .join('\n') || '(no skills discovered)',
         );
         return;
-      case '/model':
-        setSystemNotice(`provider: ${providerName}   model: ${activeModel}`);
+      case '/model': {
+        // Build a flat list of all (provider, model) pairs across every
+        // registered provider — the user can switch BOTH provider and
+        // model in one pick. Grouping is by provider name.
+        const providers = session.providers.list();
+        if (providers.length === 0) {
+          setSystemNotice('no providers registered');
+          return;
+        }
+        const options: ListPickerOption[] = [];
+        for (const p of providers) {
+          for (const m of p.models) {
+            options.push({
+              id: `${p.name}::${m.id}`,
+              label: m.id,
+              group: p.name,
+              current: providerName === p.name && activeModel === m.id,
+              description: m.contextWindow ? `${formatTokensShort(m.contextWindow)} ctx` : undefined,
+            });
+          }
+        }
+        setPicker({
+          kind: 'model',
+          title: 'Switch model',
+          options,
+        });
         return;
+      }
+      case '/loop': {
+        const strategies = session.loops.list();
+        const options: ListPickerOption[] = strategies.map((s) => ({
+          id: s.name,
+          label: s.name,
+          current: s.name === loopName,
+        }));
+        if (options.length === 0) {
+          setSystemNotice('no loop strategies registered');
+          return;
+        }
+        setPicker({ kind: 'loop', title: 'Switch loop strategy', options });
+        return;
+      }
       case '/yolo':
       case '/auto-approve':
         setYolo((y) => {
@@ -175,8 +255,13 @@ export const InteractiveSession: React.FC<InteractiveSessionProps> = ({
     setBusy(true);
     streamingBufferRef.current = '';
     setStreamingDelta('');
+    const effectiveModel = activeModelOverride ?? model;
     try {
-      for await (const _event of runTurn(session, text, model ? { model } : {})) {
+      for await (const _event of runTurn(
+        session,
+        text,
+        effectiveModel ? { model: effectiveModel } : {},
+      )) {
         void _event;
       }
     } catch (err) {
@@ -224,10 +309,6 @@ export const InteractiveSession: React.FC<InteractiveSessionProps> = ({
           onDecide={(decision) => {
             const { call, resolve } = pendingPermission;
             setPendingPermission(null);
-            // `allow_always` persists to ~/.moxxy/permissions.json so
-            // future sessions also skip the prompt. The resolver itself
-            // adds the tool name to its in-memory sessionAllows set, so
-            // queued calls inside this same turn are auto-approved too.
             if (decision.mode === 'allow_always') {
               void session.permissions
                 .addAllow({ name: call.name, reason: 'allow_always via TUI dialog' })
@@ -235,6 +316,13 @@ export const InteractiveSession: React.FC<InteractiveSessionProps> = ({
             }
             resolve(decision);
           }}
+        />
+      ) : picker ? (
+        <ListPicker
+          title={picker.title}
+          options={picker.options}
+          onSelect={handlePickerSelect}
+          onCancel={() => setPicker(null)}
         />
       ) : (
         <PromptInput
@@ -253,3 +341,9 @@ export const InteractiveSession: React.FC<InteractiveSessionProps> = ({
     </Box>
   );
 };
+
+function formatTokensShort(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(0)}k`;
+  return String(n);
+}

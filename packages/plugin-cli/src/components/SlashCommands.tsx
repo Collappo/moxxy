@@ -17,7 +17,8 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<SlashCommand> = [
   { name: 'clear', description: 'Clear the chat scrollback (events stay in the log)' },
   { name: 'tools', description: 'List the tools the active session can call' },
   { name: 'skills', description: 'List the discovered skills' },
-  { name: 'model', description: 'Show the active provider + model' },
+  { name: 'model', description: 'Switch provider + model — opens a picker' },
+  { name: 'loop', description: 'Switch loop strategy (tool-use / plan-execute / …)' },
   {
     name: 'yolo',
     description: 'Toggle auto-approve mode — every tool call allowed without asking',

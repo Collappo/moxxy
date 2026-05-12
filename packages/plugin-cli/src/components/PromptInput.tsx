@@ -11,10 +11,6 @@ export interface PromptInputProps {
   readonly onSubmit: (value: string) => void;
   readonly disabled?: boolean;
   readonly placeholder?: string;
-  /**
-   * Slash-command catalog the autocomplete dropdown searches against.
-   * Defaults to BUILTIN_SLASH_COMMANDS — pass a custom list to extend.
-   */
   readonly slashCommands?: ReadonlyArray<SlashCommand>;
 }
 
@@ -25,20 +21,31 @@ export const PromptInput: React.FC<PromptInputProps> = ({
   slashCommands = BUILTIN_SLASH_COMMANDS,
 }) => {
   const [buffer, setBuffer] = useState('');
+  const [cursor, setCursor] = useState(0);
   const [slashCursor, setSlashCursor] = useState(0);
 
-  // The slash dropdown only opens on a SINGLE-LINE buffer that starts
-  // with `/` — multi-line composing modes shouldn't keep popping the
-  // command picker as the user types prose.
   const slashEligible = buffer.startsWith('/') && !buffer.includes('\n');
   const slashMatches: ReadonlyArray<SlashCommand> = slashEligible
     ? matchSlash(buffer, slashCommands)
     : [];
 
+  const insertAt = (text: string): void => {
+    setBuffer((b) => b.slice(0, cursor) + text + b.slice(cursor));
+    setCursor((c) => c + text.length);
+  };
+
+  const reset = (): void => {
+    setBuffer('');
+    setCursor(0);
+    setSlashCursor(0);
+  };
+
   useInput((input, key) => {
     if (disabled) return;
 
     if (slashMatches.length > 0) {
+      // Up/down navigates the slash dropdown. Left/right still moves
+      // the cursor in the buffer (the dropdown doesn't capture those).
       if (key.upArrow) {
         setSlashCursor((c) => Math.max(0, c - 1));
         return;
@@ -50,64 +57,113 @@ export const PromptInput: React.FC<PromptInputProps> = ({
       if (key.tab) {
         const picked = slashMatches[Math.min(slashCursor, slashMatches.length - 1)];
         if (picked) {
-          setBuffer(`/${picked.name}`);
+          const next = `/${picked.name}`;
+          setBuffer(next);
+          setCursor(next.length);
           setSlashCursor(0);
         }
         return;
       }
     }
 
+    // Cursor motion. Option/Alt + arrow = word-jump (bash/readline
+    // convention). Plain arrow = single-char.
+    if (key.leftArrow) {
+      if (key.meta) setCursor((c) => moveWordBackward(buffer, c));
+      else setCursor((c) => Math.max(0, c - 1));
+      return;
+    }
+    if (key.rightArrow) {
+      if (key.meta) setCursor((c) => moveWordForward(buffer, c));
+      else setCursor((c) => Math.min(buffer.length, c + 1));
+      return;
+    }
+
+    // Home / End — also handle Ctrl+A / Ctrl+E for bash habits.
+    if (key.ctrl && input === 'a') {
+      setCursor(lineStart(buffer, cursor));
+      return;
+    }
+    if (key.ctrl && input === 'e') {
+      setCursor(lineEnd(buffer, cursor));
+      return;
+    }
+
     if (key.return) {
-      // Backslash-Enter: line continuation. The user is composing a
-      // multi-line prompt and wants a newline, not a submit. Strip the
-      // trailing `\` and append a newline; keep the buffer open.
-      if (buffer.endsWith('\\')) {
-        setBuffer((b) => b.slice(0, -1) + '\n');
-        setSlashCursor(0);
+      // Backslash-Enter: line continuation. Strip the trailing `\` and
+      // insert a newline at the cursor; buffer stays open.
+      if (cursor > 0 && buffer[cursor - 1] === '\\') {
+        setBuffer((b) => b.slice(0, cursor - 1) + '\n' + b.slice(cursor));
+        // cursor moves forward 0 net (removed 1, inserted 1)
         return;
       }
       const trimmed = buffer.trim();
-      setBuffer('');
-      setSlashCursor(0);
+      reset();
       if (trimmed) onSubmit(trimmed);
       return;
     }
-    if (key.backspace || key.delete) {
-      setBuffer((b) => b.slice(0, -1));
+    if (key.backspace) {
+      // Delete the char to the LEFT of the cursor.
+      if (cursor === 0) return;
+      setBuffer((b) => b.slice(0, cursor - 1) + b.slice(cursor));
+      setCursor((c) => c - 1);
+      setSlashCursor(0);
+      return;
+    }
+    if (key.delete) {
+      // Forward-delete: char to the RIGHT of the cursor.
+      if (cursor >= buffer.length) return;
+      setBuffer((b) => b.slice(0, cursor) + b.slice(cursor + 1));
       setSlashCursor(0);
       return;
     }
     if (key.escape) {
-      setBuffer('');
-      setSlashCursor(0);
+      reset();
       return;
     }
     if (key.ctrl && input === 'c') {
       process.exit(0);
     }
-    // Accept single-key + paste. Newlines from paste are PRESERVED so a
-    // multi-line clipboard payload comes in intact (the user can review
-    // and submit). Tab/vertical-tab/etc. are still stripped because
-    // terminals occasionally inject them around pasted content.
-    if (!key.meta && !key.ctrl && !key.return && input) {
-      const sanitized = input.replace(/[\r\t\v\f]/g, '');
+    // Accept printable input (single char or pasted block). Newlines
+    // preserved (so a multi-line paste survives), tabs/CR stripped.
+    // The extra `!key.backspace && !key.delete && !key.leftArrow && …`
+    // guards stop us from re-inserting the DEL/BS byte that Ink also
+    // passes alongside backspace/delete events — without that the user
+    // sees "backspace doesn't work" because every delete is immediately
+    // followed by re-inserting the literal control char.
+    if (
+      !key.meta &&
+      !key.ctrl &&
+      !key.return &&
+      !key.backspace &&
+      !key.delete &&
+      !key.leftArrow &&
+      !key.rightArrow &&
+      !key.upArrow &&
+      !key.downArrow &&
+      !key.escape &&
+      !key.tab &&
+      input
+    ) {
+      // Also strip DEL (0x7f) and BS (0x08) explicitly in case the
+      // terminal still smuggles them through with input non-empty.
+      const sanitized = input.replace(/[\r\t\v\f\x08\x7f]/g, '');
       if (sanitized) {
-        setBuffer((b) => b + sanitized);
+        insertAt(sanitized);
         setSlashCursor(0);
       }
     }
   });
 
+  // Render the buffer line-by-line, splicing in an inverse-video cursor
+  // glyph at the current position. When the buffer is empty, the cursor
+  // sits on the placeholder so the user can still see where input goes.
   const lines = buffer.length === 0 ? [''] : buffer.split('\n');
-  const lastLineIdx = lines.length - 1;
-  const showHint = buffer.length === 0 && placeholder;
+  const isEmpty = buffer.length === 0;
+  let consumed = 0;
 
   return (
-    <Box flexDirection="column">
-      {/* Wrap the input lines in horizontal rules so the buffer reads as
-          a clear "input box" — Ink draws single-line borders on the top
-          and bottom edges only via per-edge border flags. Color stays
-          gray + dim so the chrome doesn't compete with the cursor. */}
+    <Box flexDirection="column" marginTop={1}>
       <Box
         flexDirection="column"
         borderStyle="single"
@@ -117,23 +173,42 @@ export const PromptInput: React.FC<PromptInputProps> = ({
         borderBottom
         borderLeft={false}
         borderRight={false}
-        paddingY={0}
       >
         {lines.map((line, i) => {
-          const prefix =
-            i === 0
-              ? disabled
-                ? '… '
-                : '› '
-              : '  ';
-          const isCursorLine = i === lastLineIdx;
+          const lineStartIdx = consumed;
+          const cursorInLine = cursor - lineStartIdx;
+          const inThisLine = cursorInLine >= 0 && cursorInLine <= line.length;
+          consumed += line.length + 1; // +1 for '\n'
+
+          const prefix = i === 0 ? (disabled ? '… ' : '› ') : '  ';
+          const prefixColor = i === 0 ? (disabled ? 'gray' : 'green') : undefined;
+
+          if (isEmpty && i === 0) {
+            return (
+              <Box key={i}>
+                <Text color={prefixColor}>{prefix}</Text>
+                <Text inverse>{' '}</Text>
+                {placeholder ? <Text dimColor>{placeholder}</Text> : null}
+              </Box>
+            );
+          }
+          if (!inThisLine) {
+            return (
+              <Box key={i}>
+                <Text color={prefixColor}>{prefix}</Text>
+                <Text>{line}</Text>
+              </Box>
+            );
+          }
+          const before = line.slice(0, cursorInLine);
+          const atChar = line[cursorInLine] ?? ' ';
+          const after = line.slice(cursorInLine + 1);
           return (
             <Box key={i}>
-              <Text color={i === 0 ? (disabled ? 'gray' : 'green') : undefined}>{prefix}</Text>
-              <Text>{line}</Text>
-              {isCursorLine && showHint ? (
-                <Text dimColor>{placeholder}</Text>
-              ) : null}
+              <Text color={prefixColor}>{prefix}</Text>
+              <Text>{before}</Text>
+              <Text inverse>{atChar}</Text>
+              <Text>{after}</Text>
             </Box>
           );
         })}
@@ -147,3 +222,31 @@ export const PromptInput: React.FC<PromptInputProps> = ({
     </Box>
   );
 };
+
+// Word-jump helpers — bash readline semantics. Forward: skip whitespace,
+// then skip non-whitespace; land just past the end of the current word.
+// Backward: mirror.
+
+function moveWordForward(buf: string, pos: number): number {
+  let i = pos;
+  while (i < buf.length && /\s/.test(buf[i]!)) i++;
+  while (i < buf.length && !/\s/.test(buf[i]!)) i++;
+  return i;
+}
+
+function moveWordBackward(buf: string, pos: number): number {
+  let i = pos;
+  while (i > 0 && /\s/.test(buf[i - 1]!)) i--;
+  while (i > 0 && !/\s/.test(buf[i - 1]!)) i--;
+  return i;
+}
+
+function lineStart(buf: string, pos: number): number {
+  const nl = buf.lastIndexOf('\n', pos - 1);
+  return nl === -1 ? 0 : nl + 1;
+}
+
+function lineEnd(buf: string, pos: number): number {
+  const nl = buf.indexOf('\n', pos);
+  return nl === -1 ? buf.length : nl;
+}
