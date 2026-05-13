@@ -169,6 +169,7 @@ async function* runToolUseLoop(ctx: LoopContext): AsyncIterable<MoxxyEvent> {
           sessionId: String(ctx.sessionId),
           turnId: String(ctx.turnId),
           log: ctx.log,
+          ...(ctx.subagents ? { subagents: ctx.subagents } : {}),
         });
         yield await ctx.emit({
           type: 'tool_result',

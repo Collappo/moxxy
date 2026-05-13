@@ -6,6 +6,7 @@ import type { EventLogReader } from './log.js';
 import type { PermissionResolver } from './permission.js';
 import type { LLMProvider } from './provider.js';
 import type { Skill } from './skill.js';
+import type { SubagentSpawner } from './subagent.js';
 import type { ToolDef } from './tool.js';
 
 export interface ToolRegistry {
@@ -58,6 +59,13 @@ export interface LoopContext {
   readonly pluginHost: PluginHostHandle;
   readonly signal: AbortSignal;
   readonly maxIterations?: number;
+  /**
+   * Spawn one or more child agents that share the parent's registries
+   * but run in isolation. Children stream their events back to the
+   * parent log as `plugin_event` records with `subagent_*` subtypes.
+   * Absent in synthetic test contexts that don't model a full Session.
+   */
+  readonly subagents?: SubagentSpawner;
   emit(event: EmittedEvent): Promise<MoxxyEvent>;
 }
 

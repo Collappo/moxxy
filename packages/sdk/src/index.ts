@@ -49,6 +49,12 @@ export type {
 
 export type { ToolContext, ToolDef } from './tool.js';
 
+export type {
+  SubagentSpec,
+  SubagentResult,
+  SubagentSpawner,
+} from './subagent.js';
+
 
 export type {
   ContentBlock,

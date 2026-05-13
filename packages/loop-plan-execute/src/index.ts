@@ -578,6 +578,7 @@ async function executeStep(
           sessionId: String(ctx.sessionId),
           turnId: String(ctx.turnId),
           log: ctx.log,
+          ...(ctx.subagents ? { subagents: ctx.subagents } : {}),
         });
         await ctx.emit({
           type: 'tool_result',

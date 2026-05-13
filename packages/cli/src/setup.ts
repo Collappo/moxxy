@@ -32,6 +32,7 @@ import { openaiCodexPlugin } from '@moxxy/plugin-provider-openai-codex';
 import { builtinToolsPlugin } from '@moxxy/tools-builtin';
 import { toolUseLoopPlugin } from '@moxxy/loop-tool-use';
 import { planExecuteLoopPlugin } from '@moxxy/loop-plan-execute';
+import { bmadLoopPlugin } from '@moxxy/loop-bmad';
 import { summarizeCompactorPlugin } from '@moxxy/compactor-summarize';
 import { BUILTIN_SKILLS_DIR } from '@moxxy/skills-builtin';
 import {
@@ -149,6 +150,7 @@ export async function setupSessionWithConfig(opts: SetupOptions): Promise<SetupR
     { name: '@moxxy/tools-builtin', plugin: builtinToolsPlugin },
     { name: '@moxxy/loop-tool-use', plugin: toolUseLoopPlugin },
     { name: '@moxxy/loop-plan-execute', plugin: planExecuteLoopPlugin },
+    { name: '@moxxy/loop-bmad', plugin: bmadLoopPlugin },
     { name: '@moxxy/compactor-summarize', plugin: summarizeCompactorPlugin },
     { name: '@moxxy/plugin-vault', plugin: vaultPlugin },
     { name: '@moxxy/plugin-memory', plugin: memoryPlugin },

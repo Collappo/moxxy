@@ -1,4 +1,4 @@
-import type { EventLogReader, ToolContext, ToolDef } from '@moxxy/sdk';
+import type { EventLogReader, SubagentSpawner, ToolContext, ToolDef } from '@moxxy/sdk';
 import type { Logger } from '../logger.js';
 import { asToolCallId, asSessionId, asTurnId } from '@moxxy/sdk';
 
@@ -18,6 +18,12 @@ interface ExecuteOptions {
   readonly log?: EventLogReader;
   readonly logger?: Logger;
   readonly cwd?: string;
+  /**
+   * Optional spawner — passed by run-turn so multi-agent tools (e.g.
+   * `dispatch_agent`) can fan work out from inside the tool-use loop.
+   * Plain `tools.execute()` callers (tests, one-off scripts) may omit it.
+   */
+  readonly subagents?: SubagentSpawner;
 }
 
 export class ToolRegistryImpl implements ToolRegistry {
@@ -86,6 +92,7 @@ export class ToolRegistryImpl implements ToolRegistry {
       signal,
       log: opts.log ?? emptyLog(),
       logger: opts.logger ?? this.defaultLogger,
+      ...(opts.subagents ? { subagents: opts.subagents } : {}),
     };
 
     const result = await tool.handler(parsed, ctx);

@@ -1,5 +1,6 @@
 import type { EmittedEvent, LoopContext, MoxxyEvent, UserPromptAttachment } from '@moxxy/sdk';
 import type { Session } from './session.js';
+import { createSubagentSpawner } from './subagents.js';
 
 export interface RunTurnOptions {
   readonly model?: string;
@@ -82,6 +83,12 @@ export async function* runTurn(
       pluginHost: session.pluginHost,
       signal: effectiveSignal,
       maxIterations: opts.maxIterations,
+      subagents: createSubagentSpawner({
+        parentSession: session,
+        parentTurnId: turnId,
+        parentSignal: effectiveSignal,
+        parentModel: model,
+      }),
       emit: (event: EmittedEvent) => session.log.append(event),
     };
 

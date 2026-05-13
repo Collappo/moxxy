@@ -189,6 +189,9 @@ importers:
       '@moxxy/core':
         specifier: workspace:*
         version: link:../core
+      '@moxxy/loop-bmad':
+        specifier: workspace:*
+        version: link:../loop-bmad
       '@moxxy/loop-plan-execute':
         specifier: workspace:*
         version: link:../loop-plan-execute
@@ -352,6 +355,37 @@ importers:
       vitest:
         specifier: ^2.1.8
         version: 2.1.9(@types/node@22.19.18)
+
+  packages/loop-bmad:
+    dependencies:
+      '@moxxy/sdk':
+        specifier: workspace:*
+        version: link:../sdk
+    devDependencies:
+      '@moxxy/core':
+        specifier: workspace:*
+        version: link:../core
+      '@moxxy/testing':
+        specifier: workspace:*
+        version: link:../testing
+      '@moxxy/tsconfig':
+        specifier: workspace:*
+        version: link:../../tooling/tsconfig
+      '@moxxy/vitest-preset':
+        specifier: workspace:*
+        version: link:../../tooling/vitest-preset
+      '@types/node':
+        specifier: ^22.10.0
+        version: 22.19.18
+      typescript:
+        specifier: ^5.7.3
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.8
+        version: 2.1.9(@types/node@22.19.18)
+      zod:
+        specifier: ^3.24.0
+        version: 3.25.76
 
   packages/loop-plan-execute:
     dependencies:
@@ -878,6 +912,15 @@ importers:
         specifier: ^3.24.0
         version: 3.25.76
     devDependencies:
+      '@moxxy/core':
+        specifier: workspace:*
+        version: link:../core
+      '@moxxy/loop-tool-use':
+        specifier: workspace:*
+        version: link:../loop-tool-use
+      '@moxxy/testing':
+        specifier: workspace:*
+        version: link:../testing
       '@moxxy/tsconfig':
         specifier: workspace:*
         version: link:../../tooling/tsconfig

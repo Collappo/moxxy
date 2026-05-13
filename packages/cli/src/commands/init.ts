@@ -68,6 +68,11 @@ export async function runInitCommand(argv: ParsedArgv): Promise<number> {
   const loops = [
     { id: 'tool-use', label: 'tool-use', description: 'Default Claude Code-style loop (recommended)' },
     { id: 'plan-execute', label: 'plan-execute', description: 'Plan-then-execute strategy' },
+    {
+      id: 'bmad',
+      label: 'bmad',
+      description: 'BMAD: Analysis → Planning → Solutioning → Implementation (multi-persona)',
+    },
   ];
 
   const embedders = [

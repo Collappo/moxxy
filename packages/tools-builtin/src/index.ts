@@ -1,12 +1,13 @@
 import { definePlugin, type ToolDef } from '@moxxy/sdk';
 import { bashTool } from './bash.js';
+import { dispatchAgentTool } from './dispatch-agent.js';
 import { editTool } from './edit.js';
 import { globTool } from './glob.js';
 import { grepTool } from './grep.js';
 import { readTool } from './read.js';
 import { writeTool } from './write.js';
 
-export { bashTool, editTool, globTool, grepTool, readTool, writeTool };
+export { bashTool, dispatchAgentTool, editTool, globTool, grepTool, readTool, writeTool };
 
 export const builtinTools: ReadonlyArray<ToolDef> = [
   readTool,
@@ -15,6 +16,7 @@ export const builtinTools: ReadonlyArray<ToolDef> = [
   bashTool,
   grepTool,
   globTool,
+  dispatchAgentTool,
 ];
 
 export const builtinToolsPlugin = definePlugin({

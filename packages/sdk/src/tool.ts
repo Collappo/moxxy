@@ -2,6 +2,7 @@ import type { z } from 'zod';
 import type { EventLogReader } from './log.js';
 import type { PermissionRule } from './permission.js';
 import type { SessionId, ToolCallId, TurnId } from './ids.js';
+import type { SubagentSpawner } from './subagent.js';
 
 export interface ToolContext {
   readonly sessionId: SessionId;
@@ -16,6 +17,13 @@ export interface ToolContext {
     warn(msg: string, meta?: Record<string, unknown>): void;
     error(msg: string, meta?: Record<string, unknown>): void;
   };
+  /**
+   * Spawner for child agents — present when the tool was invoked inside
+   * a run-turn loop (the normal case). Tools that fan work out (e.g.
+   * `dispatch_agent`) call `subagents.spawn(...)` to start a focused
+   * child loop and stream its events back to the parent log.
+   */
+  readonly subagents?: SubagentSpawner;
 }
 
 export interface ToolDef {
