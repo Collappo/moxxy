@@ -16,25 +16,72 @@ import {
   beginPairing,
   clearPairing,
   createPairingState,
-  handleCode,
   handleStart,
   isAuthorized,
+  submitTerminalCode,
+  type PairingDecision,
   type PairingState,
 } from './pairing.js';
 import { TurnRenderer, splitForTelegram } from './render.js';
+import { markdownToTelegramHtml } from './format.js';
+import type { RenderedFrame } from './render.js';
 
 const AUTHORIZED_CHAT_KEY = 'telegram_authorized_chat_id';
 const TOKEN_KEY = 'telegram_bot_token';
 
+/**
+ * Compose one Telegram message string from the renderer's structured
+ * snapshot. The activity block is pre-formatted HTML (the renderer
+ * emits `<blockquote>`, `<code>`, `<b>`, `<i>` directly so it can
+ * style tool calls without going through the markdown converter). The
+ * assistant body is plain Markdown from the model — convert it through
+ * `markdownToTelegramHtml` so `**bold**`, `` `code` ``, ```code blocks```,
+ * `[links](…)`, and list bullets render natively in Telegram.
+ *
+ * The error line is also pre-formatted HTML (small, controlled).
+ */
+function composeFrame(snap: RenderedFrame): string {
+  const parts: string[] = [];
+  if (snap.activityHtml) parts.push(snap.activityHtml);
+  if (snap.body) parts.push(markdownToTelegramHtml(snap.body));
+  if (snap.errorHtml) parts.push(snap.errorHtml);
+  return parts.join('\n\n');
+}
+
+/** Strip every HTML tag for plain-text fallback when Telegram rejects
+ *  our parse_mode=HTML payload (rare — usually a malformed entity in
+ *  user-supplied content). Keeps text content intact. */
+function stripHtml(html: string): string {
+  return html
+    .replace(/<\/?[a-z][^>]*>/gi, '')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"');
+}
+
 export interface TelegramStartOpts extends ChannelStartOptsBase {
   readonly session: Session;
   /**
-   * If true, begin a pairing window on startup and emit the 6-digit code via
-   * the logger / stderr so the host operator can read it. Equivalent to the
-   * previous `moxxy telegram pair` invocation.
+   * If true, open a pairing window on startup. The window waits for the
+   * user to send /start to the bot in Telegram; when /start lands the
+   * bot DMs a 6-digit code to that chat. The host (terminal wizard)
+   * subscribes via `onPairingIssued` and prompts the user to paste the
+   * code, then calls `confirmPairingCode` to finalize.
    */
   readonly pair?: boolean;
 }
+
+/** Fires when /start lands in `pair` mode and a code is DM'd to the chat. */
+export interface PairingIssuedEvent {
+  readonly code: string;
+  readonly chatId: number;
+}
+
+/** Result returned by `confirmPairingCode`. */
+export type PairingConfirmResult =
+  | { ok: true; chatId: number }
+  | { ok: false; reason: 'mismatch' | 'expired' | 'not-pending' | 'no-window'; message: string };
 
 export interface TelegramChannelOptions {
   readonly vault: VaultStore;
@@ -79,6 +126,9 @@ export class TelegramChannel implements Channel<TelegramStartOpts> {
   // the lifetime of a turn. Cleared in `stopTyping()` (always called
   // from runUserTurn's finally block).
   private typingTimer: ReturnType<typeof setInterval> | null = null;
+  // Pairing observers. The terminal wizard subscribes before start()
+  // so it can react to /start landing in pair mode.
+  private readonly pairingIssuedListeners = new Set<(e: PairingIssuedEvent) => void>();
 
   constructor(opts: TelegramChannelOptions) {
     this.opts = opts;
@@ -104,13 +154,8 @@ export class TelegramChannel implements Channel<TelegramStartOpts> {
     });
 
     if (startOpts.pair) {
-      const code = this.beginPairingWindow();
-      this.opts.logger?.info?.('telegram pairing window open', { code });
-      process.stderr.write(
-        `\n  Telegram pairing code:  ${code}\n` +
-          '  Send /start to your bot, then type this code in Telegram.\n' +
-          '  (Window: 5 minutes)\n\n',
-      );
+      this.beginPairingWindow();
+      this.opts.logger?.info?.('telegram pairing window open');
     } else if (this.pairing.phase !== 'paired') {
       throw new Error(
         'No Telegram chat is paired yet. Run `moxxy channels telegram pair` to start a pairing window first.',
@@ -159,11 +204,14 @@ export class TelegramChannel implements Channel<TelegramStartOpts> {
     return this.handle;
   }
 
-  /** Begin a pairing window. Returns the 6-digit code to display in the host. */
-  beginPairingWindow(): string {
-    const { state, code } = beginPairing(this.pairing);
-    this.pairing = state;
-    return code;
+  /**
+   * Begin a pairing window. The terminal calls this before /start lands
+   * in Telegram. No code is generated yet — `handleStart` issues the
+   * code once /start arrives, so it can be DM'd to the specific chat
+   * that asked for it.
+   */
+  beginPairingWindow(): void {
+    this.pairing = beginPairing(this.pairing);
   }
 
   pairingPhase(): PairingState['phase'] {
@@ -174,17 +222,88 @@ export class TelegramChannel implements Channel<TelegramStartOpts> {
     this.pairing = clearPairing(this.pairing);
   }
 
+  /**
+   * Subscribe to "code issued" events. Fires each time /start lands in
+   * the pair window (including re-issues to the same chat). The wizard
+   * subscribes before `start()` so the first /start can't race past it.
+   * Returns an unsubscribe function.
+   */
+  onPairingIssued(listener: (e: PairingIssuedEvent) => void): () => void {
+    this.pairingIssuedListeners.add(listener);
+    return () => this.pairingIssuedListeners.delete(listener);
+  }
+
+  /**
+   * Called by the terminal wizard when the user pastes a code. Returns a
+   * structured result the wizard can branch on (success / mismatch /
+   * expired / not-pending). On success the chat-id is persisted to the
+   * vault by the caller; this method itself is pure-state.
+   */
+  async confirmPairingCode(rawInput: string): Promise<PairingConfirmResult> {
+    if (this.pairing.phase === 'idle') {
+      return { ok: false, reason: 'no-window', message: 'No pairing window is open.' };
+    }
+    const decision = submitTerminalCode(this.pairing, rawInput);
+    this.pairing = decision.state;
+    const action = decision.action;
+    if (action.kind === 'paired') {
+      // Persist immediately so the bot keeps the authorization after a
+      // restart. Caller doesn't need to remember to write it.
+      await this.opts.vault.set(AUTHORIZED_CHAT_KEY, String(action.chatId));
+      // Greet the chat that just got authorized so the user has a
+      // confirmation on the Telegram side too — symmetric with the
+      // success message they'll see in the terminal.
+      if (this.bot) {
+        try {
+          await this.bot.api.sendMessage(
+            action.chatId,
+            '✅ Paired with the moxxy terminal. Send a prompt to begin.',
+          );
+        } catch (err) {
+          this.opts.logger?.warn('pairing: greeting send failed', { err: String(err) });
+        }
+      }
+      return { ok: true, chatId: action.chatId };
+    }
+    if (action.kind === 'still-paired') return { ok: true, chatId: action.chatId };
+    if (action.kind === 'mismatch') return { ok: false, reason: 'mismatch', message: action.message };
+    if (action.kind === 'expired') return { ok: false, reason: 'expired', message: action.message };
+    if (action.kind === 'not-pending') return { ok: false, reason: 'not-pending', message: action.message };
+    return { ok: false, reason: 'mismatch', message: 'unexpected pairing state' };
+  }
+
   private async handleStartCommand(ctx: Context): Promise<void> {
     const chatId = ctx.chat?.id;
     if (!chatId) return;
-    const decision = handleStart(this.pairing, chatId);
+    const decision: PairingDecision = handleStart(this.pairing, chatId);
     this.pairing = decision.state;
     const action = decision.action;
     if (action.kind === 'still-paired') {
       await ctx.reply('Welcome back! Send me a prompt.');
       return;
     }
-    if (action.kind === 'reject' || action.kind === 'request-code') {
+    if (action.kind === 'issue-code') {
+      // DM the code to the user, then notify the terminal wizard so it
+      // can prompt for the code in the host.
+      const body =
+        `${action.message}\n\n` +
+        `<b><code>${action.code}</code></b>\n\n` +
+        `<i>Open your moxxy terminal and paste these 6 digits when prompted.</i>`;
+      try {
+        await ctx.reply(body, { parse_mode: 'HTML' });
+      } catch (err) {
+        this.opts.logger?.warn('telegram pair: failed to send code', { err: String(err) });
+      }
+      for (const listener of this.pairingIssuedListeners) {
+        try {
+          listener({ code: action.code, chatId: action.chatId });
+        } catch (err) {
+          this.opts.logger?.warn('pairing listener threw', { err: String(err) });
+        }
+      }
+      return;
+    }
+    if (action.kind === 'reject' || action.kind === 'wait' || action.kind === 'expired') {
       await ctx.reply(action.message);
     }
   }
@@ -193,23 +312,6 @@ export class TelegramChannel implements Channel<TelegramStartOpts> {
     const chatId = ctx.chat?.id;
     const text = ctx.message?.text;
     if (!chatId || !text) return;
-
-    if (this.pairing.phase === 'awaiting-code') {
-      const decision = handleCode(this.pairing, chatId, text);
-      this.pairing = decision.state;
-      switch (decision.action.kind) {
-        case 'paired':
-          await this.opts.vault.set(AUTHORIZED_CHAT_KEY, String(decision.action.chatId));
-          await ctx.reply(decision.action.message);
-          return;
-        case 'reject':
-        case 'wait':
-          await ctx.reply(decision.action.message);
-          return;
-        default:
-          return;
-      }
-    }
 
     if (!isAuthorized(this.pairing, chatId)) {
       await ctx.reply(
@@ -471,12 +573,14 @@ export class TelegramChannel implements Channel<TelegramStartOpts> {
     this.busy = true;
     this.renderer.reset();
     this.currentChatId = chatId;
-    // Kick off "typing…" right away so the user gets immediate feedback
-    // even before the first placeholder message lands.
+    // Kick off "typing…" right away so the user gets immediate
+    // feedback. Don't send an ellipsis placeholder message — the
+    // typing indicator IS the placeholder. `flushEdit` lazily sends
+    // the first real frame when there's content to display, then
+    // edits that message for every subsequent frame.
     this.startTyping(chatId);
-    const initial = await ctx.reply('…');
-    this.currentMessageId = initial.message_id;
-    this.lastSentFrame = '…';
+    this.currentMessageId = null;
+    this.lastSentFrame = '';
 
     const unsubscribe = this.session.log.subscribe((event) => {
       const frame = this.renderer.accept(event);
@@ -554,35 +658,88 @@ export class TelegramChannel implements Channel<TelegramStartOpts> {
       clearTimeout(this.editTimer);
       this.editTimer = null;
     }
-    if (!this.bot || !this.currentChatId || !this.currentMessageId) return;
-    const frame = this.renderer.snapshot();
-    if (!frame || frame === this.lastSentFrame) {
-      if (final && !frame) {
-        await this.safeEdit(this.currentChatId, this.currentMessageId, '(no output)');
+    if (!this.bot || !this.currentChatId) return;
+    const snap = this.renderer.snapshot();
+    const html = composeFrame(snap);
+    if (!html || html === this.lastSentFrame) {
+      // Nothing rendered yet AND it's the final flush — must produce
+      // at least one message so the user isn't left with the typing
+      // indicator dangling.
+      if (final && !html && this.currentMessageId == null) {
+        await this.safeSend(this.currentChatId, '<i>(no output)</i>');
       }
       return;
     }
-    const parts = splitForTelegram(frame);
+    const parts = splitForTelegram(html);
     const head = parts[0]!;
-    await this.safeEdit(this.currentChatId, this.currentMessageId, head);
+    if (this.currentMessageId == null) {
+      // First real content of this turn — send (don't edit a placeholder).
+      const sent = await this.safeSend(this.currentChatId, head);
+      if (sent) this.currentMessageId = sent;
+    } else {
+      await this.safeEdit(this.currentChatId, this.currentMessageId, head);
+    }
     this.lastSentFrame = head;
     if (final && parts.length > 1) {
       for (const tail of parts.slice(1)) {
-        try {
-          await this.bot.api.sendMessage(this.currentChatId, tail);
-        } catch {
-          /* ignore */
-        }
+        await this.safeSend(this.currentChatId, tail);
       }
     }
   }
 
+  /**
+   * `text` is already Telegram-flavored HTML (produced by
+   * `composeFrame`). Try HTML; on parse-entity errors, strip tags and
+   * send plain text so the message still lands instead of looping on
+   * the same edit forever.
+   */
   private async safeEdit(chatId: number, messageId: number, text: string): Promise<void> {
     try {
-      await this.bot!.api.editMessageText(chatId, messageId, text);
+      await this.bot!.api.editMessageText(chatId, messageId, text, {
+        parse_mode: 'HTML',
+        link_preview_options: { is_disabled: true },
+      });
+      return;
     } catch (err) {
       if (err instanceof GrammyError && err.description?.includes('not modified')) return;
+      if (err instanceof GrammyError && /can't parse entities|Bad Request: can't parse/i.test(err.description ?? '')) {
+        try {
+          await this.bot!.api.editMessageText(chatId, messageId, stripHtml(text));
+          return;
+        } catch (plainErr) {
+          if (plainErr instanceof GrammyError && plainErr.description?.includes('not modified')) return;
+          this.opts.logger?.warn('editMessageText plain-fallback failed', { err: String(plainErr) });
+          return;
+        }
+      }
       this.opts.logger?.warn('editMessageText failed', { err: String(err) });
+    }
+  }
+
+  /**
+   * Send a new message (first frame of a turn or split-tail).
+   * Returns the new message_id on success so callers can set
+   * currentMessageId for future edits.
+   */
+  private async safeSend(chatId: number, text: string): Promise<number | null> {
+    try {
+      const sent = await this.bot!.api.sendMessage(chatId, text, {
+        parse_mode: 'HTML',
+        link_preview_options: { is_disabled: true },
+      });
+      return sent.message_id;
+    } catch (err) {
+      if (err instanceof GrammyError && /can't parse entities|Bad Request: can't parse/i.test(err.description ?? '')) {
+        try {
+          const sent = await this.bot!.api.sendMessage(chatId, stripHtml(text));
+          return sent.message_id;
+        } catch (plainErr) {
+          this.opts.logger?.warn('sendMessage plain-fallback failed', { err: String(plainErr) });
+          return null;
+        }
+      }
+      this.opts.logger?.warn('sendMessage failed', { err: String(err) });
+      return null;
     }
   }
 

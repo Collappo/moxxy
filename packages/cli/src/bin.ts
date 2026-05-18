@@ -24,26 +24,26 @@ import { pickSlogan } from '@moxxy/plugin-cli';
 type CommandHandler = (argv: ParsedArgv) => Promise<number>;
 
 /**
- * Help is rendered as a vertical-stepper layout that matches the look of the
- * `moxxy init` clack-based wizard: a `┌` corner at the top, a `│` rail down
- * the left of every line, and a `└` corner at the bottom. Sections are
- * separated by an empty `│` line and labeled with a bullet (`◇`).
+ * Help is rendered as section blocks: dim bold header, then two
+ * columns per row (bold command + dim description). Matches the
+ * `moxxy channels` listing aesthetic — no rails, no clack glyphs,
+ * mono palette only.
  */
 const SECTIONS: ReadonlyArray<{ readonly title: string; readonly rows: ReadonlyArray<readonly [string, string]> }> = [
   {
     title: 'USAGE',
     rows: [
       ['moxxy', 'start the interactive TUI (default channel)'],
-      ['moxxy <channel>', 'start a registered channel by name (e.g. `moxxy slack`)'],
-      ['moxxy -p "..."', 'one-shot prompt to stdout'],
-      ['moxxy <command> ...', 'run a built-in subcommand (see below)'],
+      ['moxxy <channel>', 'start a registered channel by name (e.g. `moxxy telegram`)'],
+      ['moxxy -p "…"', 'one-shot prompt to stdout'],
+      ['moxxy <command> …', 'run a built-in subcommand (see below)'],
     ],
   },
   {
     title: 'SETUP',
     rows: [
       ['init', 'interactive first-time setup (provider keys → vault)'],
-      ['login openai-codex', 'OAuth sign-in for ChatGPT Pro/Plus (Codex backend)'],
+      ['login <provider>', 'OAuth sign-in for providers that don\'t use API keys'],
       ['login status|logout', 'inspect / remove stored OAuth credentials'],
       ['doctor [--check-keys]', 'diagnose config, vault, providers, channels, memory'],
     ],
@@ -55,25 +55,25 @@ const SECTIONS: ReadonlyArray<{ readonly title: string; readonly rows: ReadonlyA
       ['resume [-s <id>|<id>]', 'resume a persisted session (interactive picker if no id)'],
       ['channels', 'list registered channels + their subcommands'],
       ['channels <name>', 'start a channel by name (same as `moxxy <name>`)'],
-      ['channels <name> <sub>', 'invoke a channel-defined subcommand (e.g. telegram pair)'],
+      ['channels <name> <sub>', 'invoke a channel-defined subcommand'],
     ],
   },
   {
     title: 'MANAGE',
     rows: [
-      ['sessions list', 'list persisted sessions, most-recent first'],
-      ['skills list|new <name>', 'manage skill files'],
-      ['plugins list|reload', 'manage plugin host'],
-      ['perms list|allow|deny|remove|clear|path', 'view/edit the permission policy'],
+      ['sessions list|delete', 'list / remove persisted sessions'],
+      ['skills list|new|audit', 'manage skill files'],
+      ['plugins list|reload|new', 'manage plugin host'],
+      ['perms list|allow|deny|remove|clear|path', 'view / edit the permission policy'],
       ['memory list|audit|show|revert|prune-stale|path', 'curate long-term memory'],
       ['mcp list|enable|disable|remove|path', 'manage Model Context Protocol servers'],
-      ['schedule list|add|remove|run|daemon', 'manage time-driven prompts (cron/heartbeat)'],
+      ['schedule list|add|remove|run|daemon', 'manage time-driven prompts (cron / heartbeat)'],
     ],
   },
   {
     title: 'FLAGS',
     rows: [
-      ['--prompt, -p "..."', 'one-shot input (alias of the positional `prompt` form)'],
+      ['--prompt, -p "…"', 'one-shot input (alias of the positional `prompt` form)'],
       ['--model <id>', 'override the default model for this invocation'],
       ['--output-format <fmt>', 'text | json | stream-json (one-shot output mode)'],
       ['--allow-tools, --allow-all', 'permission shortcuts for non-interactive runs'],
@@ -92,51 +92,38 @@ const SECTIONS: ReadonlyArray<{ readonly title: string; readonly rows: ReadonlyA
   },
 ];
 
-const STEP_BULLET = '◇';
-const RAIL = '│';
-const RAIL_TOP = '┌';
-const RAIL_BOTTOM = '└';
-
 function renderHelp(): string {
-  // Compute a single max-column width across every section so commands and
-  // descriptions line up no matter which header you scan to.
+  // Pad every command column to the widest entry across all sections so
+  // commands and descriptions line up consistently down the page —
+  // mirrors the columnar layout `moxxy channels` uses for the
+  // name+status pair.
   const colWidth = Math.max(
     ...SECTIONS.flatMap((s) => s.rows.map(([cmd]) => cmd.length)),
   );
 
-  const rail = colors.dim(RAIL);
-  const bullet = colors.dim(STEP_BULLET);
   const version = cliVersion();
-  // Box header carries the slogan (plus version) — replaces the older
-  // "moxxy v0.0.0 — block-based agentic loop" line.
   const header =
     colors.dim(colors.italic(pickSlogan())) +
     (version ? colors.dim(`  ·  v${version}`) : '');
 
   const out: string[] = [];
-  out.push(`${colors.dim(RAIL_TOP)}  ${header}`);
-  out.push(rail);
+  out.push(header);
+  out.push('');
 
   SECTIONS.forEach((section, i) => {
-    out.push(`${bullet}  ${colors.bold(section.title)}`);
+    out.push(colors.bold(section.title));
     for (const [cmd, desc] of section.rows) {
       const padded = cmd.padEnd(colWidth, ' ');
-      out.push(`${rail}    ${colors.green(padded)}  ${colors.dim(desc)}`);
+      out.push(`  ${colors.bold(padded)}  ${colors.dim(desc)}`);
     }
-    if (i < SECTIONS.length - 1) out.push(rail);
+    if (i < SECTIONS.length - 1) out.push('');
   });
 
-  out.push(rail);
-  out.push(
-    `${rail}  ${colors.bold('Keys')}  ${colors.dim(
-      'provider keys resolve in order: vault → env var → interactive prompt',
-    )}`,
-  );
-  out.push(`${rail}        ${colors.dim('(TTY only; prompted values are saved back to the vault).')}`);
-  out.push(rail);
-  out.push(
-    `${colors.dim(RAIL_BOTTOM)}  ${colors.dim('Run')} ${colors.cyan('moxxy init')} ${colors.dim('to get started.')}`,
-  );
+  out.push('');
+  out.push(`  ${colors.bold('Keys'.padEnd(colWidth))}  ${colors.dim('vault → env var → interactive prompt (TTY only;')}`);
+  out.push(`  ${' '.repeat(colWidth)}  ${colors.dim('prompted values are saved back to the vault).')}`);
+  out.push('');
+  out.push(`${colors.dim('Run')} ${colors.bold('moxxy init')} ${colors.dim('to get started.')}`);
 
   return out.join('\n') + '\n';
 }
@@ -178,17 +165,33 @@ async function main(): Promise<number> {
 
   // Not a built-in. See if it names a registered channel — skip the
   // API-key prompt so a typo doesn't accidentally boot the provider.
+  //
+  // CRITICAL: the try/catch wraps ONLY the channel-existence probe. A
+  // failure in `runChannelByName` (e.g. the telegram wizard's
+  // hand-off recursing into itself, the bot throwing on startup) must
+  // bubble out as a real error — silently swallowing it and falling
+  // through to "unknown command" misled users into thinking the
+  // channel disappeared mid-flow.
+  let isChannel = false;
   try {
     const { session } = await setupSessionWithConfig({
       cwd: process.cwd(),
       skipKeyPrompt: true,
       tolerateNoProvider: true,
+      // We only need the channel registry here, never the provider.
+      // Activating it can hang or throw on hosts without a configured
+      // key, which would mask the real "unknown command" feedback.
+      skipProviderActivation: true,
     });
-    if (session.channels.has(argv.command)) {
-      return await runChannelByName(argv.command, argv);
-    }
+    isChannel = session.channels.has(argv.command);
   } catch {
-    // setup failed for an unrelated reason — fall through to "unknown command".
+    // Probe failed; fall through to "unknown command" so the user
+    // gets a clear message rather than a confusing setup stack trace.
+  }
+  if (isChannel) {
+    // Outside the try: any error from running the channel propagates
+    // normally and is surfaced by the top-level .catch in main().then().
+    return await runChannelByName(argv.command, argv);
   }
 
   process.stderr.write(

@@ -150,13 +150,22 @@ const StreamingPreview: React.FC<{ content: string }> = memo(function StreamingP
  * one shot. So this cap only affects what's visible during the typing
  * animation — the historical record is complete.
  */
+/**
+ * Hard ceiling on the streaming preview, regardless of terminal
+ * height. The previous "rows - 12" budget worked when the streaming
+ * block was the ONLY thing in the live region, but a turn with open
+ * skill scopes or pending tool calls above accumulates a tall live
+ * region on top of the preview — push past terminal rows and Ink
+ * drops into clear-on-each-frame overflow mode, which is the flicker
+ * the user reports during long responses. Capping at 18 lines keeps
+ * the preview compact enough that even a busy live region above
+ * stays within a 30-row terminal without overflow.
+ */
+const STREAM_PREVIEW_MAX = 18;
+
 function tailForViewport(content: string): string {
   const rows = process.stdout.rows ?? 24;
-  // Reserve ~10 rows for the bottom UI (StatusLine + InputBox + a
-  // margin) plus the AssistantBlock's bullet/spacing. Bias toward
-  // smaller window so the input row stays visible during very long
-  // streaming bodies.
-  const budget = Math.max(8, rows - 12);
+  const budget = Math.max(8, Math.min(STREAM_PREVIEW_MAX, rows - 14));
   const lines = content.split('\n');
   if (lines.length <= budget) return content;
   const elided = lines.length - budget;

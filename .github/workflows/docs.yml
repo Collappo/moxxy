@@ -40,6 +40,14 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # configure-pages MUST run before upload-pages-artifact when the
+      # repo's Pages source is set to "GitHub Actions" (the modern
+      # default). Without it, the upload step 404s looking for a
+      # Pages site that hasn't been initialized for the workflow —
+      # the failure mode the user was hitting.
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
       - name: Build docs
         run: pnpm --filter docs build
 

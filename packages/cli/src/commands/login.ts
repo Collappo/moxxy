@@ -2,6 +2,7 @@ import type { ParsedArgv } from '../argv.js';
 import { bootSessionWithConfig, hasBoolFlag } from '../argv-helpers.js';
 import { colors } from '../colors.js';
 import { buildProviderAuthContext } from '../wizard/auth-context.js';
+import { formatHelp } from './help-format.js';
 import type { ProviderDef } from '@moxxy/sdk';
 import type { Session } from '@moxxy/core';
 
@@ -13,31 +14,46 @@ import type { Session } from '@moxxy/core';
  */
 
 function buildHelp(session: Session | null): string {
-  const oauthLines = session
+  const oauthRows: Array<[string, string]> = session
     ? session.providers
         .list()
         .filter((d) => d.auth?.kind === 'oauth')
         .map((d) => {
           const service = d.auth?.kind === 'oauth' ? d.auth.serviceName : undefined;
-          return service
-            ? `  moxxy login ${d.name.padEnd(22)} Sign in with ${service}`
-            : `  moxxy login ${d.name}`;
+          return [d.name, service ? `sign in with ${service}` : 'OAuth sign-in'] as [string, string];
         })
-    : ['  (no providers loaded — run inside a moxxy project)'];
+    : [['(none)', 'no providers loaded — run inside a moxxy project']];
 
-  return (
-    `moxxy login — OAuth sign-in for providers that don't use API keys\n\n` +
-    `${oauthLines.join('\n')}\n` +
-    `                                    Flags:\n` +
-    `                                      --no-browser   force the headless device-code flow\n` +
-    `                                                     (auto-selected when stdin is not a TTY)\n` +
-    `  moxxy login status [<provider>]   Show currently-stored OAuth credentials (no secrets printed)\n` +
-    `  moxxy login logout <provider>     Remove stored OAuth credentials for a provider\n\n` +
-    `After a successful login the credentials live in the encrypted vault\n` +
-    `(~/.moxxy/vault.json). Set the active provider via moxxy.config.yaml:\n\n` +
-    `  provider:\n` +
-    `    name: <provider>\n`
-  );
+  return formatHelp({
+    title: 'moxxy login',
+    tagline: "OAuth sign-in for providers that don't use API keys",
+    sections: [
+      {
+        title: 'PROVIDERS',
+        rows: oauthRows.length > 0 ? oauthRows : [['(none)', 'no OAuth-capable providers registered']],
+      },
+      {
+        title: 'COMMANDS',
+        rows: [
+          ['status [<provider>]', 'show currently-stored OAuth credentials (no secrets printed)'],
+          ['logout <provider>', 'remove stored OAuth credentials for a provider'],
+        ],
+      },
+      {
+        title: 'FLAGS',
+        rows: [
+          ['--no-browser', 'force the headless device-code flow (auto when no TTY)'],
+        ],
+      },
+    ],
+    footer: [
+      'After a successful login the credentials live in the encrypted vault',
+      '(~/.moxxy/vault.json). Set the active provider via moxxy.config.yaml:',
+      '',
+      '  provider:',
+      '    name: <provider>',
+    ],
+  });
 }
 
 export async function runLoginCommand(argv: ParsedArgv): Promise<number> {
@@ -103,21 +119,26 @@ async function loginProvider(argv: ParsedArgv, providerName: string): Promise<nu
 
   try {
     const result = await def.auth.login(ctx);
-    const expiresStr =
+    const expires =
       result.expiresAt !== undefined
-        ? colors.dim(`token expires ${new Date(result.expiresAt).toLocaleString()}`)
-        : colors.dim('credentials stored');
+        ? `token expires ${new Date(result.expiresAt).toLocaleString()}`
+        : 'credentials stored';
+    const rows: Array<[string, string]> = [
+      ['account', result.accountId ?? '(none)'],
+      ['token', expires],
+    ];
+    const col = Math.max(...rows.map(([k]) => k.length));
+    process.stdout.write(colors.bold('logged in') + '\n');
+    for (const [k, v] of rows) {
+      process.stdout.write(`  ${colors.bold(k.padEnd(col))}  ${colors.dim(v)}\n`);
+    }
     process.stdout.write(
-      `${colors.green('✓ Login successful.')} ` +
-        `Account: ${colors.bold(result.accountId ?? '(none)')}  ` +
-        expiresStr +
-        `\n\n` +
-        `Set ${colors.cyan(`provider.name: ${providerName}`)} in moxxy.config.yaml to use it.\n`,
+      '\n' + colors.dim(`Set provider.name: ${providerName} in moxxy.config.yaml to use it.`) + '\n',
     );
     return 0;
   } catch (err) {
     process.stderr.write(
-      `${colors.red('✗ Login failed:')} ${err instanceof Error ? err.message : String(err)}\n`,
+      `${colors.red('login failed:')} ${err instanceof Error ? err.message : String(err)}\n`,
     );
     return 1;
   }
@@ -154,29 +175,35 @@ async function loginStatus(argv: ParsedArgv): Promise<number> {
     if (auth.kind !== 'oauth') continue;
     if (!auth.status) {
       process.stdout.write(
-        `${colors.bold(def.name)} ${colors.dim('— status not reported by plugin')}\n`,
+        `${colors.bold(def.name)}  ${colors.dim('status not reported by plugin')}\n`,
       );
       continue;
     }
     const status = await auth.status(ctx);
     if (!status) {
       process.stdout.write(
-        `${colors.dim(def.name)}: ${colors.yellow('not logged in')}\n` +
-          `  Run \`moxxy login ${def.name}\` to sign in.\n`,
+        `${colors.bold(def.name)}  ${colors.dim('not logged in')}\n` +
+          `${' '.repeat(def.name.length)}  ${colors.dim('run `moxxy login ' + def.name + '` to sign in')}\n`,
       );
       continue;
     }
     const expired = status.expiresAt !== undefined && status.expiresAt < Date.now();
-    process.stdout.write(
-      `${colors.bold(def.name)}\n` +
-        `  account:        ${status.accountId ?? colors.dim('(none)')}\n` +
-        (status.expiresAt !== undefined
-          ? `  access expires: ${new Date(status.expiresAt).toLocaleString()}` +
-            (expired ? ` ${colors.red('(expired — will refresh on next call)')}` : '') +
-            '\n'
-          : '') +
-        (status.vaultKey ? `  vault key:      ${colors.dim(status.vaultKey)}\n` : ''),
-    );
+    const rows: Array<[string, string]> = [['account', status.accountId ?? '(none)']];
+    if (status.expiresAt !== undefined) {
+      rows.push([
+        'expires',
+        `${new Date(status.expiresAt).toLocaleString()}${expired ? ' (expired — will refresh on next call)' : ''}`,
+      ]);
+    }
+    if (status.vaultKey) rows.push(['vault', status.vaultKey]);
+    const col = Math.max(...rows.map(([k]) => k.length));
+    process.stdout.write(colors.bold(def.name) + '\n');
+    for (const [k, v] of rows) {
+      const isExpired = k === 'expires' && expired;
+      process.stdout.write(
+        `  ${colors.bold(k.padEnd(col))}  ${isExpired ? colors.red(v) : colors.dim(v)}\n`,
+      );
+    }
   }
   return 0;
 }
@@ -209,9 +236,11 @@ async function loginLogout(argv: ParsedArgv): Promise<number> {
   const ctx = buildProviderAuthContext(vault, { headless: true });
   const removed = await def.auth.logout(ctx);
   if (removed) {
-    process.stdout.write(`${colors.green('✓ Logged out.')} OAuth credentials removed from the vault.\n`);
+    process.stdout.write(
+      `${colors.bold('logged out')}  ${colors.dim('OAuth credentials removed from the vault')}\n`,
+    );
     return 0;
   }
-  process.stdout.write(`${colors.dim(`No stored credentials for ${providerName}.`)}\n`);
+  process.stdout.write(colors.dim(`no stored credentials for ${providerName}`) + '\n');
   return 0;
 }

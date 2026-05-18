@@ -14,21 +14,32 @@ export {
   createPairingState,
   beginPairing,
   handleStart,
-  handleCode,
+  submitTerminalCode,
   isAuthorized,
   clearPairing,
   type PairingPhase,
   type PairingState,
   type PairingDecision,
 } from './pairing.js';
+export type { PairingIssuedEvent, PairingConfirmResult } from './channel.js';
 export { TurnRenderer, splitForTelegram } from './render.js';
+export { markdownToTelegramHtml } from './format.js';
 
 export interface BuildTelegramPluginOptions {
   readonly vault: VaultStore;
 }
 
-const TOKEN_KEY = 'telegram_bot_token';
-const AUTHORIZED_CHAT_KEY = 'telegram_authorized_chat_id';
+/** Vault key the plugin uses for the Bot API token. Exported so the
+ *  CLI's interactive setup wizard can read/write the same slot. */
+export const TELEGRAM_TOKEN_KEY = 'telegram_bot_token';
+/** Vault key the plugin uses for the paired chat id. */
+export const TELEGRAM_AUTHORIZED_CHAT_KEY = 'telegram_authorized_chat_id';
+/** Regex validating a Telegram bot token (`<digits>:<22+ url-safe>`). */
+export const TELEGRAM_TOKEN_RE = /^\d+:[A-Za-z0-9_-]{20,}$/;
+
+// Backwards-compat aliases for the existing call sites in this file.
+const TOKEN_KEY = TELEGRAM_TOKEN_KEY;
+const AUTHORIZED_CHAT_KEY = TELEGRAM_AUTHORIZED_CHAT_KEY;
 
 export function buildTelegramPlugin(opts: BuildTelegramPluginOptions): Plugin {
   return definePlugin({
@@ -67,8 +78,22 @@ export function buildTelegramPlugin(opts: BuildTelegramPluginOptions): Plugin {
         },
         subcommands: {
           pair: {
-            description: 'Start the bot and emit a pairing code for first-run authorization.',
-            run: async (ctx) => ctx.startChannel({ pair: true }),
+            description:
+              'Open a pairing window. Send /start to your bot in Telegram; it will DM a 6-digit code to paste back in the terminal.',
+            run: async (ctx) => {
+              // Pairing requires an interactive terminal — the user
+              // must paste the bot-issued code into a prompt. In a
+              // headless invocation we bail with a clear message
+              // instead of silently starting a bot that nobody can
+              // confirm.
+              if (process.stdin.isTTY !== true) {
+                process.stderr.write(
+                  'Pairing needs a TTY. Run `moxxy telegram` (interactively) on a workstation, then copy the resulting vault to this host.\n',
+                );
+                return 1;
+              }
+              return ctx.startChannel({ pair: true });
+            },
           },
           unpair: {
             description: 'Forget the currently authorized Telegram chat.',

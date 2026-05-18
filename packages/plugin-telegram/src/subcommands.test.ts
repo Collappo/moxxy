@@ -88,10 +88,30 @@ describe('telegram channel subcommands (registered on ChannelDef)', () => {
     expect(writeOut.join('')).toContain('no pairing was active');
   });
 
-  it('`pair` delegates to startChannel with pair=true', async () => {
-    const startChannel = vi.fn(async () => 0);
-    await telegramDef.subcommands!.pair!.run(ctx({ startChannel }));
-    expect(startChannel).toHaveBeenCalledWith({ pair: true });
+  it('`pair` delegates to startChannel with pair=true in an interactive TTY', async () => {
+    const originalIsTTY = process.stdin.isTTY;
+    Object.defineProperty(process.stdin, 'isTTY', { value: true, configurable: true });
+    try {
+      const startChannel = vi.fn(async () => 0);
+      await telegramDef.subcommands!.pair!.run(ctx({ startChannel }));
+      expect(startChannel).toHaveBeenCalledWith({ pair: true });
+    } finally {
+      Object.defineProperty(process.stdin, 'isTTY', { value: originalIsTTY, configurable: true });
+    }
+  });
+
+  it('`pair` refuses to start without a TTY (interactive-only flow)', async () => {
+    const originalIsTTY = process.stdin.isTTY;
+    Object.defineProperty(process.stdin, 'isTTY', { value: false, configurable: true });
+    try {
+      const startChannel = vi.fn(async () => 0);
+      const code = await telegramDef.subcommands!.pair!.run(ctx({ startChannel }));
+      expect(code).toBe(1);
+      expect(startChannel).not.toHaveBeenCalled();
+      expect(writeErr.join('')).toMatch(/TTY/);
+    } finally {
+      Object.defineProperty(process.stdin, 'isTTY', { value: originalIsTTY, configurable: true });
+    }
   });
 
   it('subcommands return 1 when vault is unavailable', async () => {

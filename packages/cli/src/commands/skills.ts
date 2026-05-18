@@ -4,8 +4,25 @@ import { promises as fs } from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import type { ParsedArgv } from '../argv.js';
-import { confirmedYes } from '../argv-helpers.js';
+import { confirmedYes, helpRequested } from '../argv-helpers.js';
 import { printError } from '../errors.js';
+import { colors } from '../colors.js';
+import { formatHelp } from './help-format.js';
+
+const HELP = formatHelp({
+  title: 'moxxy skills',
+  tagline: 'manage skill files (.md frontmatter + body)',
+  sections: [
+    {
+      title: 'COMMANDS',
+      rows: [
+        ['list', 'list discovered skills (project + user + built-in)'],
+        ['new <name>', 'scaffold a new user-scope skill in ~/.moxxy/skills'],
+        ['audit', 'inspect agent-created skills (revert | path)'],
+      ],
+    },
+  ],
+});
 
 interface AuditEntry {
   slug: string;
@@ -19,6 +36,10 @@ const AUDIT_PATH = (): string => path.join(os.homedir(), '.moxxy', 'skills', '.m
 
 export async function runSkillsCommand(argv: ParsedArgv): Promise<number> {
   const sub = argv.positional[0] ?? 'list';
+  if (sub === 'help' || helpRequested(argv)) {
+    process.stdout.write(HELP);
+    return 0;
+  }
   if (sub === 'list') {
     const skills = await discoverSkills({
       projectDir: defaultProjectSkillsDir(process.cwd()),
@@ -26,8 +47,17 @@ export async function runSkillsCommand(argv: ParsedArgv): Promise<number> {
       builtinDir: BUILTIN_SKILLS_DIR,
       logger: silentLogger,
     });
+    if (skills.length === 0) {
+      process.stdout.write(colors.dim('(no skills discovered)') + '\n');
+      return 0;
+    }
+    const nameCol = Math.max(8, ...skills.map((s) => s.frontmatter.name.length));
+    const scopeCol = Math.max(7, ...skills.map((s) => s.scope.length));
     for (const s of skills) {
-      process.stdout.write(`${s.frontmatter.name}\t${s.scope}\t${s.frontmatter.description}\n`);
+      const name = colors.bold(s.frontmatter.name.padEnd(nameCol));
+      const scope = colors.dim(s.scope.padEnd(scopeCol));
+      const desc = colors.dim(s.frontmatter.description);
+      process.stdout.write(`${name}  ${scope}  ${desc}\n`);
     }
     return 0;
   }
@@ -43,13 +73,13 @@ export async function runSkillsCommand(argv: ParsedArgv): Promise<number> {
       file,
       `---\nname: ${name}\ndescription: TODO\ntriggers: []\nallowed-tools: []\n---\n# ${name}\n\nTODO\n`,
     );
-    process.stdout.write(`created ${file}\n`);
+    process.stdout.write(`${colors.bold('created')}  ${colors.dim(file)}\n`);
     return 0;
   }
   if (sub === 'audit') {
     return await runAudit(argv);
   }
-  printError(`unknown 'skills' subcommand: ${sub}`);
+  printError(`unknown 'skills' subcommand: ${sub}\n${HELP}`);
   return 2;
 }
 
@@ -59,15 +89,17 @@ async function runAudit(argv: ParsedArgv): Promise<number> {
 
   if (action === 'list') {
     if (entries.length === 0) {
-      process.stdout.write('(no agent-created skills logged)\n');
+      process.stdout.write(colors.dim('(no agent-created skills logged)') + '\n');
       return 0;
     }
     const groups = groupSimilarPrompts(entries);
     for (const group of groups) {
-      const header = group.length === 1 ? '' : ` [${group.length} similar]`;
-      process.stdout.write(`\n${truncate(group[0]!.originatingPrompt, 80)}${header}\n`);
+      const header = group.length === 1 ? '' : colors.dim(`  · ${group.length} similar`);
+      process.stdout.write(`\n${colors.bold(truncate(group[0]!.originatingPrompt, 80))}${header}\n`);
       for (const e of group) {
-        process.stdout.write(`  ${e.scope.padEnd(7)} ${e.slug.padEnd(36)} ${e.ts}\n`);
+        process.stdout.write(
+          `  ${colors.dim(e.scope.padEnd(7))}  ${colors.bold(e.slug.padEnd(36))}  ${colors.dim(e.ts)}\n`,
+        );
       }
     }
     return 0;

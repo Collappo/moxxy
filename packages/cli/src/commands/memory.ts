@@ -2,33 +2,51 @@ import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
 import { MemoryStore, defaultMemoryDir, type MemoryEntry, type MemoryType } from '@moxxy/plugin-memory';
 import type { ParsedArgv } from '../argv.js';
-import { confirmedYes } from '../argv-helpers.js';
+import { confirmedYes, helpRequested } from '../argv-helpers.js';
 import { printError } from '../errors.js';
 import { colors } from '../colors.js';
+import { formatHelp } from './help-format.js';
 
-const HELP = `moxxy memory — view and curate long-term memory
-
-  moxxy memory list                     short listing (name · type · description)
-  moxxy memory audit [--type <t>]       full audit: size, dates, tags, grouped by type
-  moxxy memory show <name>              print the body of a single entry
-  moxxy memory revert <name>            delete a single entry
-  moxxy memory prune-stale --days <n>   delete entries not updated in <n> days
-  moxxy memory path                     print the memory directory
-`;
+const HELP = formatHelp({
+  title: 'moxxy memory',
+  tagline: 'view and curate long-term memory',
+  sections: [
+    {
+      title: 'COMMANDS',
+      rows: [
+        ['list', 'short listing (name · type · description)'],
+        ['audit [--type <t>]', 'full audit: size, dates, tags, grouped by type'],
+        ['show <name>', 'print the body of a single entry'],
+        ['revert <name>', 'delete a single entry'],
+        ['prune-stale --days <n>', 'delete entries not updated in <n> days'],
+        ['path', 'print the memory directory'],
+      ],
+    },
+  ],
+});
 
 export async function runMemoryCommand(argv: ParsedArgv): Promise<number> {
   const sub = argv.positional[0] ?? 'list';
+  if (sub === 'help' || helpRequested(argv)) {
+    process.stdout.write(HELP);
+    return 0;
+  }
   const store = new MemoryStore({ embedder: null });
 
   switch (sub) {
     case 'list': {
       const entries = await store.list();
       if (entries.length === 0) {
-        process.stdout.write('(no memories)\n');
+        process.stdout.write(colors.dim('(no memories)') + '\n');
         return 0;
       }
+      const nameCol = Math.max(8, ...entries.map((e) => e.frontmatter.name.length));
+      const typeCol = Math.max(7, ...entries.map((e) => String(e.frontmatter.type).length));
       for (const e of entries) {
-        process.stdout.write(`${e.frontmatter.name}\t${e.frontmatter.type}\t${e.frontmatter.description}\n`);
+        const name = colors.bold(e.frontmatter.name.padEnd(nameCol));
+        const type = colors.dim(String(e.frontmatter.type).padEnd(typeCol));
+        const desc = colors.dim(e.frontmatter.description);
+        process.stdout.write(`${name}  ${type}  ${desc}\n`);
       }
       return 0;
     }
@@ -43,16 +61,18 @@ export async function runMemoryCommand(argv: ParsedArgv): Promise<number> {
       const byType = groupByType(stats);
       const totalSize = stats.reduce((sum, s) => sum + s.size, 0);
       process.stdout.write(
-        `${colors.bold(String(entries.length))} memories · ${colors.cyan(formatSize(totalSize))} total\n`,
+        `${colors.bold(String(entries.length))} memories · ${colors.dim(formatSize(totalSize) + ' total')}\n`,
       );
       for (const [type, items] of byType) {
-        process.stdout.write(`\n${colors.bold(colors.magenta('## ' + type))} ${colors.dim(`(${items.length})`)}\n`);
+        process.stdout.write(
+          `\n${colors.bold('## ' + type)} ${colors.dim(`(${items.length})`)}\n`,
+        );
         for (const item of items) {
           const tags = item.entry.frontmatter.tags?.length
             ? colors.dim(`  [${item.entry.frontmatter.tags.join(', ')}]`)
             : '';
           process.stdout.write(
-            `  ${item.entry.frontmatter.name.padEnd(36)} ${colors.cyan(formatSize(item.size).padStart(8))}  ${colors.dim('updated ' + formatRelative(item.updatedAt))}${tags}\n`,
+            `  ${item.entry.frontmatter.name.padEnd(36)} ${colors.dim(formatSize(item.size).padStart(8))}  ${colors.dim('updated ' + formatRelative(item.updatedAt))}${tags}\n`,
           );
         }
       }

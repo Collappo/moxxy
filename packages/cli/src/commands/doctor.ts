@@ -5,6 +5,7 @@ import type { ParsedArgv } from '../argv.js';
 import { setupSessionWithConfig } from '../setup.js';
 import { canonicalKey } from '../provider-keys.js';
 import { colors } from '../colors.js';
+import { formatHelp } from './help-format.js';
 
 type Status = 'ok' | 'warn' | 'fail';
 
@@ -14,13 +15,20 @@ interface Check {
   readonly message: string;
 }
 
-const HELP = `moxxy doctor — diagnose your moxxy setup
-
-  moxxy doctor                   run the full check sweep
-  moxxy doctor --json            machine-readable output (one Check per line)
-  moxxy doctor --check-keys      additionally call provider.validateKey() for
-                                 each configured provider (uses real API calls)
-`;
+const HELP = formatHelp({
+  title: 'moxxy doctor',
+  tagline: 'diagnose your moxxy setup',
+  sections: [
+    {
+      title: 'COMMANDS',
+      rows: [
+        ['moxxy doctor', 'run the full check sweep'],
+        ['moxxy doctor --json', 'machine-readable output (one Check per line)'],
+        ['moxxy doctor --check-keys', 'additionally call provider.validateKey() (real API calls)'],
+      ],
+    },
+  ],
+});
 
 export async function runDoctorCommand(argv: ParsedArgv): Promise<number> {
   if (argv.flags.help) {
@@ -199,28 +207,32 @@ function emit(checks: ReadonlyArray<Check>, asJson: boolean): number {
   } else {
     let maxId = 0;
     for (const c of checks) maxId = Math.max(maxId, c.id.length);
+    process.stdout.write(colors.bold('CHECKS') + '\n');
     for (const c of checks) {
+      // Tag aligned at a fixed width. Mono baseline; semantic color
+      // only on warn/fail so the eye is pulled to actionable rows.
       const tag =
         c.status === 'ok'
-          ? colors.green('[ ok ]')
+          ? colors.dim(' ok ')
           : c.status === 'warn'
-            ? colors.yellow('[warn]')
-            : colors.red('[fail]');
+            ? colors.yellow('warn')
+            : colors.red('fail');
       const id = colors.bold(c.id.padEnd(maxId));
-      const msg = c.status === 'ok' ? c.message : colors.dim(c.message);
-      process.stdout.write(`${tag}  ${id}  ${msg}\n`);
+      const msg = c.status === 'ok' ? colors.dim(c.message) : c.message;
+      process.stdout.write(`  ${tag}  ${id}  ${msg}\n`);
     }
     const ok = checks.filter((c) => c.status === 'ok').length;
     const warn = checks.filter((c) => c.status === 'warn').length;
     const fail = checks.filter((c) => c.status === 'fail').length;
     process.stdout.write(
       '\n' +
-        colors.bold('Summary: ') +
-        colors.green(`${ok} ok`) +
-        ', ' +
-        colors.yellow(`${warn} warn`) +
-        ', ' +
-        (fail > 0 ? colors.red(`${fail} fail`) : `${fail} fail`) +
+        colors.bold('SUMMARY') + '\n' +
+        '  ' +
+        colors.dim(`${ok} ok`) +
+        '  ' +
+        (warn > 0 ? colors.yellow(`${warn} warn`) : colors.dim(`${warn} warn`)) +
+        '  ' +
+        (fail > 0 ? colors.red(`${fail} fail`) : colors.dim(`${fail} fail`)) +
         '\n',
     );
   }

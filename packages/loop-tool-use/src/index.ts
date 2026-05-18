@@ -29,7 +29,19 @@ export const toolUseLoopPlugin = definePlugin({
 export default toolUseLoopPlugin;
 
 async function* runToolUseLoop(ctx: LoopContext): AsyncIterable<MoxxyEvent> {
-  const maxIterations = ctx.maxIterations ?? 50;
+  // High soft cap as a safety net against truly runaway loops (network
+  // glitch causing an infinite retry, bad prompt, etc.) — primary
+  // termination signal is now the stuck-loop detector below, which
+  // catches the common "model keeps calling the same tool" case
+  // ~10 iterations in instead of waiting for the hard cap.
+  const maxIterations = ctx.maxIterations ?? 500;
+  // Sliding window of recent tool calls for the stuck-loop detector.
+  // Tracks `<tool>(<input-hash>)` so we can spot the same call going
+  // out N times despite the model having received its previous result.
+  const recentCalls: string[] = [];
+  const WINDOW = 8;
+  /** How many identical calls in the window before we declare "stuck". */
+  const REPEAT_THRESHOLD = 3;
 
   for (let iteration = 1; iteration <= maxIterations; iteration++) {
     if (ctx.signal.aborted) {
@@ -100,6 +112,30 @@ async function* runToolUseLoop(ctx: LoopContext): AsyncIterable<MoxxyEvent> {
         input: t.input,
       });
       yield requested;
+      // Stuck-loop guard: record this call, then check whether the
+      // last few iterations have been hammering the SAME (name, input)
+      // pair. If yes, the model is almost certainly stuck (polling a
+      // tool that returns the same thing, mis-handling an error, etc.)
+      // and we should bail with a clear message instead of burning
+      // another 400 iterations.
+      const callKey = `${t.name}|${stableHash(t.input)}`;
+      recentCalls.push(callKey);
+      if (recentCalls.length > WINDOW) recentCalls.shift();
+      const repeats = recentCalls.filter((k) => k === callKey).length;
+      if (repeats >= REPEAT_THRESHOLD) {
+        yield await ctx.emit({
+          type: 'error',
+          sessionId: ctx.sessionId,
+          turnId: ctx.turnId,
+          source: 'system',
+          kind: 'fatal',
+          message:
+            `tool-use loop aborted — detected stuck pattern: tool "${t.name}" called ` +
+            `${repeats} times with identical input in the last ${recentCalls.length} ` +
+            `tool calls. The model is likely looping on the same call; reset or rephrase.`,
+        });
+        return;
+      }
     }
 
     if (text || stopReason === 'end_turn' || toolUses.length === 0) {
@@ -266,6 +302,28 @@ function buildMessages(ctx: LoopContext): ReadonlyArray<import('@moxxy/sdk').Pro
 
 function hookDeny(verdict: ToolCallVerdict): string | null {
   return verdict.action === 'deny' ? verdict.reason : null;
+}
+
+/**
+ * Stable JSON-ish hash of a tool call's input arg. Key order is
+ * canonicalised so {a:1,b:2} and {b:2,a:1} produce the same key — the
+ * stuck-loop detector needs to spot repeats regardless of how the
+ * model happened to serialize the object on a given turn.
+ */
+function stableHash(input: unknown): string {
+  return canonicalize(input);
+}
+
+function canonicalize(value: unknown): string {
+  if (value === null || value === undefined) return 'null';
+  if (typeof value !== 'object') return JSON.stringify(value);
+  if (Array.isArray(value)) {
+    return '[' + value.map(canonicalize).join(',') + ']';
+  }
+  const entries = Object.entries(value as Record<string, unknown>).sort(
+    ([a], [b]) => (a < b ? -1 : a > b ? 1 : 0),
+  );
+  return '{' + entries.map(([k, v]) => JSON.stringify(k) + ':' + canonicalize(v)).join(',') + '}';
 }
 
 async function emitDenied(

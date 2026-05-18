@@ -4,16 +4,26 @@ import { PermissionEngine } from '@moxxy/core';
 import type { ParsedArgv } from '../argv.js';
 import { confirmedYes } from '../argv-helpers.js';
 import { printError } from '../errors.js';
+import { colors } from '../colors.js';
+import { formatHelp } from './help-format.js';
 
-const HELP = `moxxy perms — view and edit ~/.moxxy/permissions.json
-
-  moxxy perms list                       show the current policy
-  moxxy perms allow <tool>[ <reason>]    add an allow rule (tool name; supports * glob)
-  moxxy perms deny  <tool>[ <reason>]    add a deny rule
-  moxxy perms remove <tool>              remove every rule (allow + deny) for <tool>
-  moxxy perms clear                      wipe the entire policy (with confirmation)
-  moxxy perms path                       print the path to the policy file
-`;
+const HELP = formatHelp({
+  title: 'moxxy perms',
+  tagline: 'view and edit ~/.moxxy/permissions.json',
+  sections: [
+    {
+      title: 'COMMANDS',
+      rows: [
+        ['list', 'show the current policy'],
+        ['allow <tool> [reason]', 'add an allow rule (tool name; supports * glob)'],
+        ['deny <tool> [reason]', 'add a deny rule'],
+        ['remove <tool>', 'remove every rule (allow + deny) for <tool>'],
+        ['clear', 'wipe the entire policy (requires --yes)'],
+        ['path', 'print the path to the policy file'],
+      ],
+    },
+  ],
+});
 
 function policyPath(): string {
   return path.join(os.homedir(), '.moxxy', 'permissions.json');
@@ -42,19 +52,26 @@ export async function runPermsCommand(argv: ParsedArgv): Promise<number> {
     case 'list': {
       const policy = engine.policySnapshot;
       if (policy.allow.length === 0 && policy.deny.length === 0) {
-        process.stdout.write('(no rules configured)\n');
+        process.stdout.write(colors.dim('(no rules configured)') + '\n');
         return 0;
       }
+      const allNames = [...policy.deny, ...policy.allow].map((r) => r.name);
+      const nameCol = Math.max(8, ...allNames.map((n) => n.length));
       if (policy.deny.length > 0) {
-        process.stdout.write('deny:\n');
+        process.stdout.write(colors.bold('DENY') + '\n');
         for (const r of policy.deny) {
-          process.stdout.write(`  ${r.name}${r.reason ? `  — ${r.reason}` : ''}\n`);
+          process.stdout.write(
+            `  ${colors.bold(r.name.padEnd(nameCol))}  ${colors.dim(r.reason ?? '')}\n`,
+          );
         }
+        if (policy.allow.length > 0) process.stdout.write('\n');
       }
       if (policy.allow.length > 0) {
-        process.stdout.write('allow:\n');
+        process.stdout.write(colors.bold('ALLOW') + '\n');
         for (const r of policy.allow) {
-          process.stdout.write(`  ${r.name}${r.reason ? `  — ${r.reason}` : ''}\n`);
+          process.stdout.write(
+            `  ${colors.bold(r.name.padEnd(nameCol))}  ${colors.dim(r.reason ?? '')}\n`,
+          );
         }
       }
       return 0;
@@ -67,9 +84,13 @@ export async function runPermsCommand(argv: ParsedArgv): Promise<number> {
         return 2;
       }
       const reason = argv.positional.slice(2).join(' ') || undefined;
-      if (sub === 'allow') await engine.addAllow({ name: tool, ...(reason ? { reason } : {}) });
+      if (cmd === 'allow') await engine.addAllow({ name: tool, ...(reason ? { reason } : {}) });
       else await engine.addDeny({ name: tool, ...(reason ? { reason } : {}) });
-      process.stdout.write(`added ${sub} rule: ${tool}${reason ? ` (${reason})` : ''}\n`);
+      process.stdout.write(
+        `${colors.bold('added')}  ${colors.bold(cmd)} ${tool}` +
+          (reason ? `  ${colors.dim('— ' + reason)}` : '') +
+          '\n',
+      );
       return 0;
     }
     case 'remove': {
@@ -79,7 +100,11 @@ export async function runPermsCommand(argv: ParsedArgv): Promise<number> {
         return 2;
       }
       const removed = await engine.removeByName(tool);
-      process.stdout.write(removed === 0 ? `no rules matched ${tool}\n` : `removed ${removed} rule${removed === 1 ? '' : 's'}\n`);
+      process.stdout.write(
+        removed === 0
+          ? colors.dim(`no rules matched ${tool}`) + '\n'
+          : `${colors.bold('removed')}  ${removed} rule${removed === 1 ? '' : 's'}\n`,
+      );
       return 0;
     }
     case 'clear': {
@@ -88,7 +113,7 @@ export async function runPermsCommand(argv: ParsedArgv): Promise<number> {
         return 2;
       }
       await engine.clear();
-      process.stdout.write('policy cleared\n');
+      process.stdout.write(colors.bold('cleared') + colors.dim('  permissions policy\n'));
       return 0;
     }
     case 'path': {

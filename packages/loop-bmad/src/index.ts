@@ -519,7 +519,11 @@ async function* runImplementationLoop(
   ctx: LoopContext,
   artifacts: Artifacts,
 ): AsyncGenerator<MoxxyEvent, boolean, unknown> {
-  const maxIterations = ctx.maxIterations ?? 50;
+  // Match loop-tool-use's defaults — see its file header. Stuck-loop
+  // detection in BMAD is left to the developer phase's parent
+  // verification gate (BMAD checkpoints between stories); the cap
+  // here is just a safety net.
+  const maxIterations = ctx.maxIterations ?? 500;
 
   const storyList = artifacts.stories
     .map((s, i) => `  ${i + 1}. [ ] ${s}`)

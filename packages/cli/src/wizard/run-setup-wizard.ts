@@ -82,14 +82,14 @@ function toOptions(
 
 export async function runSetupWizard(opts: RunSetupWizardOptions): Promise<string> {
   const version = opts.version ? colors.dim(` v${opts.version}`) : '';
-  intro(`${colors.bold(colors.magenta('moxxy'))}${version} ${colors.dim('— first-time setup')}`);
+  intro(`${colors.bold('moxxy')}${version} ${colors.dim('— first-time setup')}`);
 
   note(
     [
       `${colors.bold('1.')} Pick one or more LLM providers`,
       `${colors.bold('2.')} Paste each API key (stored encrypted in the vault)`,
       `${colors.bold('3.')} Choose a default model, loop strategy, and memory embedder`,
-      `${colors.bold('4.')} Review and write ${colors.cyan('moxxy.config.yaml')} into the project`,
+      `${colors.bold('4.')} Review and write ${colors.bold('moxxy.config.yaml')} into the project`,
     ].join('\n'),
     'What this will do',
   );
@@ -152,7 +152,7 @@ export async function runSetupWizard(opts: RunSetupWizardOptions): Promise<strin
   let model: string | null = null;
   if (modelChoices.length > 0) {
     const modelRaw = await select({
-      message: `Step 4 — Default model for ${colors.cyan(primary)}`,
+      message: `Step 4 — Default model for ${colors.bold(primary)}`,
       options: toOptions(modelChoices),
       initialValue: modelChoices[0]!.id,
     });
@@ -208,11 +208,11 @@ export async function runSetupWizard(opts: RunSetupWizardOptions): Promise<strin
     if (key) await opts.controller.saveApiKey(providerId, key);
   }
   const configPath = await opts.controller.writeConfig(yaml);
-  persist.stop(`Wrote ${colors.cyan(configPath)}`);
+  persist.stop(`Wrote ${colors.bold(configPath)}`);
 
   outro(
-    `${colors.green('✓')} Setup complete. Try ${colors.cyan('moxxy -p "hello"')} to verify, ` +
-      `or just run ${colors.cyan('moxxy')} for the interactive TUI.`,
+    `${colors.bold('✓')} Setup complete. Try ${colors.bold('moxxy -p "hello"')} to verify, ` +
+      `or just run ${colors.bold('moxxy')} for the interactive TUI.`,
   );
   return configPath;
 }
@@ -222,7 +222,7 @@ async function collectOAuth(
   loginOAuth: (providerId: string) => Promise<void>,
 ): Promise<void> {
   while (true) {
-    log.step(`Step 2 — Sign in to ${colors.cyan(providerId)} (OAuth)`);
+    log.step(`Step 2 — Sign in to ${colors.bold(providerId)} (OAuth)`);
     try {
       await loginOAuth(providerId);
       log.success(`${providerId} sign-in complete`);
@@ -242,7 +242,7 @@ async function collectOAuth(
 async function collectKey(providerId: string, controller: SetupWizardController): Promise<string> {
   while (true) {
     const valueRaw = await password({
-      message: `Step 2 — API key for ${colors.cyan(providerId)}`,
+      message: `Step 2 — API key for ${colors.bold(providerId)}`,
       // Reject empty so users don't accidentally skip — esc cancels the wizard.
       validate: (v) => (v && v.trim().length > 0 ? undefined : 'Paste your API key (esc to cancel).'),
     });
@@ -255,11 +255,13 @@ async function collectKey(providerId: string, controller: SetupWizardController)
     try {
       const result = await controller.testKey(providerId, value);
       if (result.ok) {
-        s.stop(`${colors.green('✓')} ${providerId} key looks good`);
+        s.stop(`${colors.bold('✓')} ${providerId} key looks good`);
         return value;
       }
+      // Key was rejected by the provider — fatal-flavored, keep red.
       s.stop(`${colors.red('✗')} ${providerId} rejected the key: ${result.message}`);
     } catch (err) {
+      // Couldn't reach the validator — warn-flavored, keep yellow.
       s.stop(
         `${colors.yellow('!')} could not validate ${providerId}: ${
           err instanceof Error ? err.message : String(err)

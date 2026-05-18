@@ -123,9 +123,14 @@ describe('toolUseLoop end-to-end', () => {
     expect(result.error?.message).toContain('explode');
   });
 
-  it('respects maxIterations cap', async () => {
+  it('aborts via stuck-loop detector when the model hammers the same call', async () => {
+    // The detector fires when the same (name, input) pair appears
+    // REPEAT_THRESHOLD times in the last WINDOW calls. A scripted
+    // provider that returns the same toolUse over and over is the
+    // canonical stuck-loop pattern — bail before burning the soft
+    // maxIterations cap.
     const provider = new FakeProvider({
-      script: Array(60).fill(toolUseReply('loop', {}, 'cN')),
+      script: Array(20).fill(toolUseReply('loop', {}, 'cN')),
     });
     const session = sessionWith(provider);
     session.tools.register(
@@ -136,7 +141,36 @@ describe('toolUseLoop end-to-end', () => {
         handler: () => 'ok',
       }),
     );
-    // resolver acts as autoAllow by default
+    void autoAllowResolver;
+
+    const events = await collectTurn(session, 'spin');
+    const errors = events.filter((e) => e.type === 'error');
+    expect(errors).toHaveLength(1);
+    if (errors[0]?.type !== 'error') throw new Error();
+    expect(errors[0].message).toMatch(/stuck pattern/);
+    // And the safety-net cap is still wired — exercise its message
+    // path by counting outgoing tool calls. The detector should fire
+    // around iteration 3, well below the 500-iteration cap.
+    const toolCalls = events.filter((e) => e.type === 'tool_call_requested');
+    expect(toolCalls.length).toBeLessThan(10);
+  });
+
+  it('respects an explicit maxIterations cap when no stuck loop fires', async () => {
+    // To hit the cap without tripping the detector, vary the input
+    // each iteration so the recent-calls window never sees a repeat.
+    const script = Array.from({ length: 60 }, (_, i) =>
+      toolUseReply('vary', { i }, `c${i}`),
+    );
+    const provider = new FakeProvider({ script });
+    const session = sessionWith(provider);
+    session.tools.register(
+      defineTool({
+        name: 'vary',
+        description: '',
+        inputSchema: z.object({ i: z.number() }),
+        handler: () => 'ok',
+      }),
+    );
     void autoAllowResolver;
 
     const events = await collectTurn(session, 'spin', { maxIterations: 3 });

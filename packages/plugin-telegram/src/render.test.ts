@@ -21,7 +21,8 @@ describe('TurnRenderer', () => {
     const r = new TurnRenderer();
     r.accept(baseEvent({ type: 'assistant_chunk', delta: 'hello ', source: 'model' }, 0));
     const second = r.accept(baseEvent({ type: 'assistant_chunk', delta: 'world', source: 'model' }, 1));
-    expect(second.text).toBe('hello world');
+    expect(second.body).toBe('hello world');
+    expect(second.activityHtml).toBe('');
   });
 
   it('replaces chunks with the final assistant_message on stop', () => {
@@ -30,21 +31,39 @@ describe('TurnRenderer', () => {
     const final = r.accept(
       baseEvent({ type: 'assistant_message', content: 'final', stopReason: 'end_turn', source: 'model' }, 1),
     );
-    expect(final.text).toBe('final');
+    expect(final.body).toBe('final');
   });
 
-  it('emits tool lines on tool_call_requested + tool_result', () => {
+  it('emits tool entries with status badges on tool_call_requested + tool_result', () => {
     const r = new TurnRenderer();
     r.accept(baseEvent({ type: 'tool_call_requested', callId: c1, name: 'Read', input: { path: '/a' }, source: 'model' }, 0));
     const after = r.accept(baseEvent({ type: 'tool_result', callId: c1, ok: true, output: 'ok', source: 'tool' }, 1));
-    expect(after.text).toContain('🔧 Read');
-    expect(after.text).toContain('✓ ok');
+    expect(after.activityHtml).toContain('<code>Read</code>');
+    expect(after.activityHtml).toContain('path=');
+    expect(after.activityHtml).toContain('✓');
+  });
+
+  it('marks failed tool calls with the error badge', () => {
+    const r = new TurnRenderer();
+    r.accept(baseEvent({ type: 'tool_call_requested', callId: c1, name: 'Read', input: {}, source: 'model' }, 0));
+    const after = r.accept(
+      baseEvent({
+        type: 'tool_result',
+        callId: c1,
+        ok: false,
+        error: { kind: 'threw', message: 'boom' },
+        source: 'tool',
+      }, 1),
+    );
+    expect(after.activityHtml).toContain('✗');
+    expect(after.activityHtml).toContain('threw');
   });
 
   it('appends an error footer when an error event arrives', () => {
     const r = new TurnRenderer();
     const out = r.accept(baseEvent({ type: 'error', kind: 'fatal', message: 'boom', source: 'system' }, 0));
-    expect(out.text).toContain('❗ fatal: boom');
+    expect(out.errorHtml).toContain('fatal');
+    expect(out.errorHtml).toContain('boom');
   });
 
   it('reports hasUpdate=false when the same event yields the same frame', () => {

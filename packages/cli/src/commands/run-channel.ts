@@ -3,6 +3,7 @@ import { printError } from '../errors.js';
 import { stringFlag } from '../argv-helpers.js';
 import type { ParsedArgv } from '../argv.js';
 import { runTuiWithBootstrap } from './run-tui.js';
+import { runTelegramWizard } from './telegram-wizard.js';
 
 /**
  * Generic channel dispatcher. Looks up a ChannelDef by name in the session's
@@ -22,7 +23,29 @@ export async function runChannelByName(name: string, argv: ParsedArgv): Promise<
   if (name === 'tui') {
     return runTuiWithBootstrap(argv);
   }
-  const { session, vault, config } = await bootSessionWithConfig(argv);
+  // Telegram has an interactive setup wizard shown by default for
+  // TTY users. Bypass on:
+  //   - non-TTY (cron / systemd / piped)
+  //   - `--no-wizard` (explicit opt-out)
+  //   - `__skipWizard` (set by the wizard itself when it hands off,
+  //     so the recursive call doesn't trampoline back into the menu)
+  const skipWizard =
+    argv.flags['no-wizard'] === true ||
+    argv.flags['__skipWizard'] === true ||
+    process.stdin.isTTY !== true;
+  if (name === 'telegram' && !skipWizard) {
+    return runTelegramWizard(argv);
+  }
+  // skipKeyPrompt: don't pop a synchronous readline prompt for
+  // ANTHROPIC_API_KEY (etc.) — channels like telegram start a bot
+  // process and may run for hours; if the model key resolves later
+  // from env/vault when an actual turn fires, that's fine. The TUI
+  // bootstrap already follows this pattern; the channels path was
+  // the outlier that prompted even when keys were configured in
+  // env/vault, frustrating users who'd already wired creds elsewhere.
+  const { session, vault, config } = await bootSessionWithConfig(argv, {
+    skipKeyPrompt: true,
+  });
 
   const def = session.channels.get(name);
   if (!def) {

@@ -3,13 +3,22 @@ import { deleteSession, readSessionIndex, type SessionMeta } from '@moxxy/core';
 import type { ParsedArgv } from '../argv.js';
 import { helpRequested, stringFlag } from '../argv-helpers.js';
 import { colors } from '../colors.js';
+import { formatHelp } from './help-format.js';
 
-const HELP = `moxxy sessions — manage persisted sessions
-
-  moxxy sessions list             list saved sessions, most-recent first
-  moxxy sessions delete <id>      remove a session's JSONL + index entry
-  moxxy sessions delete --empty   remove every session with 0 events
-`;
+const HELP = formatHelp({
+  title: 'moxxy sessions',
+  tagline: 'manage persisted sessions',
+  sections: [
+    {
+      title: 'COMMANDS',
+      rows: [
+        ['list', 'list saved sessions, most-recent first'],
+        ['delete <id>', "remove a session's JSONL + index entry"],
+        ['delete --empty', 'remove every session with 0 events'],
+      ],
+    },
+  ],
+});
 
 export async function runSessionsCommand(argv: ParsedArgv): Promise<number> {
   const sub = argv.positional[0] ?? 'list';
@@ -29,7 +38,7 @@ export async function runSessionsCommand(argv: ParsedArgv): Promise<number> {
   if (sub === 'delete') {
     return runDelete(argv);
   }
-  process.stderr.write(colors.red(`unknown 'sessions' subcommand: ${sub}\n${HELP}`));
+  process.stderr.write(`${colors.red(`unknown 'sessions' subcommand: ${sub}`)}\n${HELP}`);
   return 2;
 }
 
@@ -41,7 +50,7 @@ async function runDelete(argv: ParsedArgv): Promise<number> {
     const targets = all.filter((m) => m.eventCount === 0);
     for (const m of targets) await deleteSession(m.id);
     process.stdout.write(
-      colors.green(`removed ${targets.length} empty session${targets.length === 1 ? '' : 's'}\n`),
+      colors.dim(`removed ${targets.length} empty session${targets.length === 1 ? '' : 's'}\n`),
     );
     return 0;
   }
@@ -52,16 +61,24 @@ async function runDelete(argv: ParsedArgv): Promise<number> {
   }
   const id = resolveId(raw, all);
   await deleteSession(id);
-  process.stdout.write(colors.green(`removed ${id}\n`));
+  process.stdout.write(colors.dim(`removed ${id}\n`));
   return 0;
 }
 
-const RESUME_HELP = `moxxy resume — resume a previously-persisted session
-
-  moxxy resume                 pick interactively from a numbered list
-  moxxy resume -s <id>         resume the named session by id
-  moxxy resume <id>            shorthand for the above
-`;
+const RESUME_HELP = formatHelp({
+  title: 'moxxy resume',
+  tagline: 'resume a previously-persisted session',
+  sections: [
+    {
+      title: 'USAGE',
+      rows: [
+        ['moxxy resume', 'pick interactively from a numbered list'],
+        ['moxxy resume -s <id>', 'resume the named session by id'],
+        ['moxxy resume <id>', 'shorthand for the above'],
+      ],
+    },
+  ],
+});
 
 /**
  * Resolves the session id the user wants to resume:
@@ -105,13 +122,16 @@ export async function pickSessionToResume(argv: ParsedArgv): Promise<string | nu
 }
 
 function formatSessions(all: ReadonlyArray<SessionMeta>): string {
+  // Two-row entry per session: bold id with index, then dim meta on the
+  // following indented line. Matches the `channels list` layout where a
+  // bold label is followed by a dim secondary row beneath it.
   const rows = all.map((m, i) => {
     const when = formatAgo(m.lastActivity);
     const events = `${m.eventCount} ev`;
     const prompt = m.firstPrompt ?? colors.dim('(empty)');
-    const head = `${String(i + 1).padStart(3, ' ')}. ${colors.bold(m.id)}`;
-    const tail = `${colors.dim(when)} · ${colors.dim(events)} · ${colors.dim(m.cwd)}`;
-    return `${head}  ${prompt}\n     ${tail}\n`;
+    const head = `${colors.dim(String(i + 1).padStart(3, ' ') + '.')}  ${colors.bold(m.id)}`;
+    const tail = colors.dim(`${when} · ${events} · ${m.cwd}`);
+    return `${head}  ${prompt}\n        ${tail}\n`;
   });
   return rows.join('');
 }
