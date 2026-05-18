@@ -31,36 +31,116 @@ client in Google Cloud Console, an exact-match redirect URI, and the
 `access_type=offline` + `prompt=consent` params to actually receive a
 refresh_token. This skill walks through both halves.
 
-## Step 1 — Google Cloud Console setup (one-time, user does this)
+**Before doing anything else**, you MUST walk the user through the
+Cloud Console setup. Send the Step 1 script BEFORE calling any tool —
+the user can't authorize without a client_id, and a half-finished
+attempt wastes everyone's time. Wait for them to paste back the
+client_id + client_secret, then proceed to Step 2.
 
-Tell the user:
+## Step 1 — hands-on Google Cloud Console setup
 
-> Go to https://console.cloud.google.com/apis/credentials. Either pick
-> an existing project or create a new one (any name).
->
-> 1. **Enable the APIs you need** under *APIs & Services → Library*.
->    For Workspace MCP that means at minimum: Gmail API, Calendar API,
->    Drive API, Docs API, Sheets API.
->
-> 2. **Configure the OAuth consent screen** if you haven't already:
->    *APIs & Services → OAuth consent screen*. Pick "External", give
->    it any name, list yourself as the only test user. Don't bother
->    submitting for verification — test mode is fine for personal use.
->
-> 3. **Create credentials**: *APIs & Services → Credentials →
->    + Create credentials → OAuth client ID → Desktop app*. Name it
->    "moxxy" (or anything). Click Create.
->
-> 4. **Add the redirect URI**: edit the new client, scroll to
->    *Authorized redirect URIs*, add EXACTLY:
->
->        http://localhost:8765/callback
->
->    Google rejects fuzzy matches — the port and path have to be exact.
->
-> 5. Copy the **client_id** and **client_secret** values.
+Tell the user **exactly this script** (adapt phrasing, keep the
+links + values verbatim). Pause after each block and confirm the
+user reached the expected screen before moving to the next.
 
-Wait for the user to come back with both values.
+> **One-time Google Cloud setup — ~5 minutes**
+>
+> You'll register moxxy as an OAuth "Desktop app" in your Google
+> Cloud project. Free, no review needed for personal use.
+>
+> ---
+>
+> **1) Pick or create a project**
+>
+> Open https://console.cloud.google.com/projectcreate
+>
+> Give it any name (e.g. `moxxy-oauth`) — leave Location as is and
+> click **Create**. Wait a few seconds, then make sure the project
+> dropdown at the top of the page shows your new project (if not,
+> click the dropdown and pick it).
+>
+> Already have a project you want to reuse? Open
+> https://console.cloud.google.com/ and switch to it from the top
+> dropdown — that's fine too.
+>
+> ---
+>
+> **2) Enable the APIs you'll actually use**
+>
+> Open https://console.cloud.google.com/apis/library and search for
+> each API below, click it, then click the blue **Enable** button.
+> Do this once per API:
+>
+> - **Gmail API** (only if you want mail) — https://console.cloud.google.com/apis/library/gmail.googleapis.com
+> - **Google Calendar API** — https://console.cloud.google.com/apis/library/calendar-json.googleapis.com
+> - **Google Drive API** — https://console.cloud.google.com/apis/library/drive.googleapis.com
+> - **Google Docs API** — https://console.cloud.google.com/apis/library/docs.googleapis.com
+> - **Google Sheets API** — https://console.cloud.google.com/apis/library/sheets.googleapis.com
+> - **People API** (contacts) — https://console.cloud.google.com/apis/library/people.googleapis.com
+>
+> If you skip an API here, calls to it later will return `403 -
+> SERVICE_DISABLED` — you can always come back and enable more.
+>
+> ---
+>
+> **3) Configure the OAuth consent screen**
+>
+> Open https://console.cloud.google.com/apis/credentials/consent
+>
+> - **User type**: pick **External**, click Create.
+> - **App name**: anything (e.g. `moxxy`).
+> - **User support email** / **Developer contact email**: your own
+>   email is fine for both.
+> - Leave the App logo / domain fields blank.
+> - Click **Save and Continue**.
+> - On the **Scopes** step, just click **Save and Continue** —
+>   don't add anything here; moxxy requests scopes at runtime.
+> - On the **Test users** step, click **+ Add Users** and add your
+>   own Google account's email. Click **Save and Continue**.
+> - Review and click **Back to Dashboard**.
+>
+> Your app's status will say "Testing" — that's correct, leave it
+> there. You don't need to "Publish" or submit for verification for
+> personal use.
+>
+> ---
+>
+> **4) Create the OAuth client ID**
+>
+> Open https://console.cloud.google.com/apis/credentials
+>
+> - Click **+ Create Credentials** → **OAuth client ID**.
+> - **Application type**: pick **Desktop app**.
+> - **Name**: `moxxy` (or anything).
+> - Click **Create**.
+>
+> A popup appears with your **Client ID** and **Client Secret**.
+> Click **Download JSON** to save a backup, then copy both values.
+>
+> ---
+>
+> **5) Paste them back here**
+>
+> Send me both values in the next message (they're not real secrets
+> in the credential-theft sense for a Desktop app — but treat them
+> like passwords; they go straight into the moxxy vault):
+>
+> ```
+> client_id:     <paste here>
+> client_secret: <paste here>
+> ```
+>
+> (Note: Desktop-app clients don't need a redirect URI registered —
+> Google accepts any `http://localhost:*/...` callback for this app
+> type. moxxy will use `http://localhost:8765/callback`.)
+
+Wait for the user to come back with both values. Don't proceed to
+Step 2 until both `client_id` and `client_secret` are in hand.
+
+If the user pastes something that doesn't look like a Google client
+id (the id looks like `123-abc.apps.googleusercontent.com`, the
+secret like `GOCSPX-...`), re-ask — silently authorizing with wrong
+values gives a confusing `invalid_client` error.
 
 ## Step 2 — run the OAuth flow
 
@@ -126,11 +206,42 @@ mcp_add_server({
   env: {
     GOOGLE_OAUTH_CLIENT_ID: "<from step 1>",
     GOOGLE_OAUTH_CLIENT_SECRET: "<from step 1>",
-    // Some Workspace MCP servers accept a refresh_token directly:
-    GOOGLE_OAUTH_REFRESH_TOKEN: "<grab from vault: oauth/google/refresh_token>"
+    // Most Workspace MCP servers accept a refresh_token directly.
+    // Get it via: oauth_get_token({ provider: "google", includeRefresh: true })
+    GOOGLE_OAUTH_REFRESH_TOKEN: "<refresh_token from oauth_get_token>"
   }
 })
 ```
+
+**Full chain (what the agent actually runs)**:
+
+```
+# After the user pastes client_id + client_secret from Step 1:
+oauth_authorize({ provider: "google", clientId, clientSecret, ... })
+   → user approves in browser → tokens land in vault
+
+# Grab the refresh_token (opt-in)
+const tokens = oauth_get_token({
+  provider: "google",
+  includeRefresh: true
+})
+
+# Hand it to the MCP server
+mcp_add_server({
+  name: "google-workspace",
+  command: "...", args: [...],
+  env: {
+    GOOGLE_OAUTH_CLIENT_ID:     <user-pasted from Step 1>,
+    GOOGLE_OAUTH_CLIENT_SECRET: <user-pasted from Step 1>,
+    GOOGLE_OAUTH_REFRESH_TOKEN: tokens.refreshToken
+  }
+})
+```
+
+The MCP server now mints its own access tokens via the refresh_token,
+so the chain is one-time setup. Future sessions just call
+`oauth_get_token` if they need a direct token (the MCP server is
+autonomous).
 
 Then the model can call `mcp__google-workspace__*` tools directly.
 
@@ -158,17 +269,36 @@ user to open it on their phone / laptop.
 
 ## Common failures
 
-- **"redirect_uri_mismatch"** — exact URL match. Re-check that you
-  added `http://localhost:8765/callback` (with port + `/callback`).
-- **"access_denied"** — the user clicked Cancel on the consent screen,
-  or their account isn't in the test-users list of an unverified app.
+- **"invalid_client"** — the `client_id` or `client_secret` is wrong
+  or from a different project. Re-check the values the user pasted
+  (or re-download the JSON from
+  https://console.cloud.google.com/apis/credentials).
+- **"redirect_uri_mismatch"** — only happens if the user picked
+  *Web application* instead of *Desktop app* in Step 1.4. Desktop
+  app clients accept any `http://localhost:*/...` redirect without
+  registration. Fix: delete the client and recreate as Desktop app.
+- **"access_denied"** — the user clicked Cancel on the consent
+  screen, OR their Google account isn't in the test-users list of
+  the unverified app. Send them to
+  https://console.cloud.google.com/apis/credentials/consent → *Test
+  users* → **+ Add Users**.
+- **"App is being verified"** / "Google hasn't verified this app"
+  warning — expected for unverified apps in test mode. The user
+  clicks **Advanced** → **Go to <appname> (unsafe)** to proceed.
+  Reassure them this is normal for personal-use apps.
 - **No `refresh_token` in the response** — happens when the user has
   already authorized the same scopes for this client; Google
   silently skips reissuing it. Fix: pass `prompt: "consent"` (which
   this skill always does) to force a fresh issuance.
-- **403 on first API call after `oauth_get_token`** — the API isn't
-  enabled in the Google Cloud project. Send the user back to
-  *APIs & Services → Library* to enable it.
+- **403 `SERVICE_DISABLED` on first API call** — the specific Google
+  API (Gmail / Calendar / etc.) isn't enabled in the project. Send
+  the user back to https://console.cloud.google.com/apis/library to
+  enable it for their project.
+- **`Token has been expired or revoked`** in long-running sessions —
+  Google's test-mode refresh_tokens expire after 7 days of
+  non-use. Re-run `oauth_authorize` to get a fresh one. (Publishing
+  the app to "Production" removes this limit but requires a
+  verification process you don't want for personal use.)
 
 ## Don't
 
