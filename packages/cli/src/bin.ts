@@ -14,6 +14,7 @@ import { runScheduleCommand } from './commands/schedule.js';
 import { runDoctorCommand } from './commands/doctor.js';
 import { runLoginCommand } from './commands/login.js';
 import { runResumeCommand } from './commands/resume.js';
+import { runServiceCommand } from './commands/service.js';
 import { runSessionsCommand } from './commands/sessions.js';
 import { setupSessionWithConfig } from './setup.js';
 import { renderLogo } from './logo.js';
@@ -68,6 +69,7 @@ const SECTIONS: ReadonlyArray<{ readonly title: string; readonly rows: ReadonlyA
       ['memory list|audit|show|revert|prune-stale|path', 'curate long-term memory'],
       ['mcp list|enable|disable|remove|path', 'manage Model Context Protocol servers'],
       ['schedule list|add|remove|run|daemon', 'manage time-driven prompts (cron / heartbeat)'],
+      ['service list|install|uninstall|start|stop|logs', 'run channels + scheduler as a background OS unit'],
     ],
   },
   {
@@ -124,6 +126,7 @@ function renderHelp(): string {
   out.push(`  ${' '.repeat(colWidth)}  ${colors.dim('prompted values are saved back to the vault).')}`);
   out.push('');
   out.push(`${colors.dim('Run')} ${colors.bold('moxxy init')} ${colors.dim('to get started.')}`);
+  out.push(`${colors.dim('See')} ${colors.bold('moxxy <command> --help')} ${colors.dim('for per-command details.')}`);
 
   return out.join('\n') + '\n';
 }
@@ -151,6 +154,7 @@ const COMMANDS: Record<string, CommandHandler> = {
   prompt: runPromptCommand,
   tui: runTuiCommand,
   resume: runResumeCommand,
+  service: runServiceCommand,
   sessions: runSessionsCommand,
   skills: runSkillsCommand,
   plugins: runPluginsCommand,
