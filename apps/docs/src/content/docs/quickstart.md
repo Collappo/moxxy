@@ -11,19 +11,24 @@ pnpm add -g @moxxy/cli
 pnpm dlx @moxxy/cli --help
 ```
 
-## 2. Set up the provider
+## 2. Pick a provider
+
+`moxxy` supports three providers out of the box. Pick one:
 
 ```sh
+# Anthropic — API key
 export ANTHROPIC_API_KEY=sk-ant-...
+
+# OpenAI — API key
+export OPENAI_API_KEY=sk-...
+
+# ChatGPT Pro/Plus (Codex backend) — OAuth, no key needed
+moxxy login openai-codex
 ```
 
-Or store it encrypted in the vault and reference it via `moxxy.config.ts`:
-
-```sh
-moxxy            # starts the TUI
-# in the TUI, ask: "save my Anthropic key in the vault"
-# the agent will call vault_set('ANTHROPIC_API_KEY', '...') (with your approval)
-```
+`moxxy init` walks through the same choices interactively and stores keys
+encrypted in the vault. After init you can reference vault entries from
+`moxxy.config.ts` via `${vault:NAME}`:
 
 ```ts
 // moxxy.config.ts
@@ -47,20 +52,40 @@ moxxy -p "list TypeScript files in src/" --allow-tools Read,Glob
 ## 4. Interactive
 
 ```sh
-moxxy                # Ink-based TUI
-moxxy telegram pair  # show a pairing code, start the Telegram bot
-moxxy telegram       # restart after pairing
+moxxy                # Ink-based TUI (default channel)
+moxxy resume         # picker for a previous session
 ```
 
-## 5. Save a memory
+## 5. Pair the Telegram bot
+
+The pairing direction was inverted in a recent release: the bot now
+issues the code, you paste it into the terminal.
+
+```sh
+# In a moxxy project, open a pairing window:
+moxxy channels telegram pair
+# → "Waiting for /start from a Telegram chat…"
+```
+
+1. Open Telegram, find your bot, send `/start`.
+2. The bot DMs you a 6-digit code.
+3. Paste the code into the moxxy terminal. The chat id is persisted to
+   the vault; next start the bot auto-authorizes it.
+
+Then run the bot foreground (`moxxy telegram`) or as a background
+service (`moxxy service install telegram`). See the
+[Telegram channel guide](./guides/telegram-channel).
+
+## 6. Save a memory
 
 In the TUI:
 
 > me: I prefer terse responses without bullet points. Remember that.
 
-The agent will call `memory_save`. Next session it can `memory_recall` and find your preference.
+The agent calls `memory_save`. Next session it can `memory_recall` and
+find your preference. Curate with `moxxy memory list|show|revert`.
 
-## 6. Author a skill
+## 7. Author a skill
 
 Add a Markdown file under `~/.moxxy/skills/` or `./.moxxy/skills/`:
 
@@ -76,16 +101,22 @@ allowed-tools: [Bash]
 3. Tail the deploy log with `kubectl logs -f deploy/staging-app`.
 ```
 
-Restart moxxy (or call `reload_skills` mid-session). Next time you say "deploy to staging" the agent runs your three steps.
+Restart moxxy (or call `reload_skills` mid-session). Next time you say
+"deploy to staging" the agent runs your three steps. The agent can also
+write skills for itself — see [Authoring a skill](./guides/authoring-a-skill).
 
 ## Where things live
 
 ```
 ~/.moxxy/
-  config.ts          user-level overrides (merged under project moxxy.config.ts)
-  permissions.json   user-level allow/deny rules
-  vault.json         AES-256-GCM encrypted secrets
-  skills/            user-scope skill files
-  memory/            journal-based long-term memory + MEMORY.md index
-  sessions/          event-log dumps for replay
+  config.ts            user-level overrides (merged under project moxxy.config.ts)
+  permissions.json     user-level allow/deny rules
+  vault.json           AES-256-GCM encrypted secrets
+  vault.key            cached master key (mode 0600; alt to OS keychain)
+  skills/              user-scope skill files
+  memory/              journal-based long-term memory + MEMORY.md index
+  sessions/            event-log dumps for replay
+  schedules.json       scheduler entries
+  mcp.json             MCP server catalog
+  services/<id>.log    background-service stdout/stderr
 ```

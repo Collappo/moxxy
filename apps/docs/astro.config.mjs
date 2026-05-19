@@ -9,7 +9,7 @@ export default defineConfig({
       description: 'Block-based, modular agentic loop framework for TypeScript.',
       tagline: 'Block-based agentic loop framework.',
       social: {
-        github: 'https://github.com/your-org/moxxy',
+        github: 'https://github.com/moxxy-ai/new_moxxy',
       },
       sidebar: [
         {
@@ -18,6 +18,14 @@ export default defineConfig({
             { label: 'Introduction', slug: 'index' },
             { label: 'Quickstart', slug: 'quickstart' },
             { label: 'Architecture', slug: 'architecture' },
+          ],
+        },
+        {
+          label: 'Channels',
+          items: [
+            { label: 'Telegram channel', slug: 'guides/telegram-channel' },
+            { label: 'HTTP channel', slug: 'guides/http-channel' },
+            { label: 'Running as a service', slug: 'guides/running-as-a-service' },
           ],
         },
         {

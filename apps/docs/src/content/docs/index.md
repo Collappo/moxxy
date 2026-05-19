@@ -9,9 +9,9 @@ description: moxxy — a block-based agentic loop framework for TypeScript.
 
 Existing agent frameworks lock you into one LLM provider, one loop topology, one frontend, one set of opinions about how the agent should behave. moxxy starts from a typed contract — `@moxxy/sdk` — and lets you plug everything else in.
 
-- Providers are plugins (`@moxxy/plugin-provider-anthropic`, etc).
-- Loop strategies are plugins (`@moxxy/loop-tool-use`, `@moxxy/loop-plan-execute`).
-- The CLI / TUI / Telegram bot are all `Channel` implementations.
+- Providers are plugins (`@moxxy/plugin-provider-anthropic`, `@moxxy/plugin-provider-openai`, `@moxxy/plugin-provider-openai-codex` for the ChatGPT-OAuth backend).
+- Loop strategies are plugins (`@moxxy/loop-tool-use`, `@moxxy/loop-plan-execute`, `@moxxy/loop-bmad`).
+- The CLI / TUI / Telegram bot / HTTP server are all `Channel` implementations.
 - Skills are prompt-only Markdown files the agent can author for itself.
 
 ## A 30-second tour
@@ -26,8 +26,13 @@ ANTHROPIC_API_KEY=sk-... moxxy -p "list TS files in cwd" --allow-tools Read,Glob
 # Interactive TUI:
 moxxy
 
-# Telegram channel (after `moxxy telegram pair`):
-moxxy telegram
+# Telegram channel: send /start to your bot in Telegram first,
+# then paste the 6-digit code the bot DMs you into the moxxy terminal:
+moxxy channels telegram pair
+
+# Install channels as background OS units (launchd / systemd --user):
+moxxy service install telegram
+moxxy service install scheduler
 ```
 
 Or embed the SDK directly:
