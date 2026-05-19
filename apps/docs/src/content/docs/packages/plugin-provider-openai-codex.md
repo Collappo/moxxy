@@ -53,14 +53,18 @@ before the next API call goes out — the CLI's setup wires this for you.
 - `openaiCodexPlugin`, `openaiCodexProviderDef`
 - `CodexProvider`, `CodexProviderConfig`
 - `codexModels`, `DEFAULT_CODEX_MODEL`
+- `codexOauthProfile`, `CODEX_PROVIDER_ID` — `OAuthProviderProfile` consumed
+  by `@moxxy/plugin-oauth`'s `runOauthLogin` / `ensureFreshTokens`
 - OAuth helpers (`CLIENT_ID`, `ISSUER`, `AUTHORIZE_URL`, `TOKEN_URL`,
   `CODEX_RESPONSES_URL`, `DEFAULT_CALLBACK_PORT`, `DEFAULT_REDIRECT_PATH`,
   `DEFAULT_REDIRECT_URI`, `SCOPES`, `ORIGINATOR`, `generatePKCE`,
   `generateState`, `buildAuthorizeUrl`, `parseJwtClaims`,
-  `extractAccountId`, `exchangeCodeForTokens`, `refreshTokens`,
-  `startDeviceAuth`, `pollDeviceAuth`)
+  `extractAccountId`, `exchangeCodeForTokens`, `refreshTokens`)
 - `toResponsesBody`, `toResponsesInput`, `toResponsesTools` — translators
 - `codexLogin`, `codexLogout`, `codexStatus` — the `auth` hooks
+- `readStoredTokens`, `persistCodexTokens`, `ensureFreshCodexTokens` — vault
+  helpers in the `CodexTokens` shape (delegate to `@moxxy/plugin-oauth`'s
+  generic storage under `oauth/openai-codex/*`)
 
 ## See also
 

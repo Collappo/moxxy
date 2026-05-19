@@ -9,7 +9,10 @@ interface ExchangeCodeInput {
   readonly codeVerifier: string;
 }
 
-export async function exchangeCodeForToken(input: ExchangeCodeInput): Promise<TokenSet> {
+export async function exchangeCodeForToken(
+  input: ExchangeCodeInput,
+  fetchImpl: typeof fetch = fetch,
+): Promise<TokenSet> {
   const body = new URLSearchParams();
   body.set('grant_type', 'authorization_code');
   body.set('code', input.code);
@@ -17,7 +20,7 @@ export async function exchangeCodeForToken(input: ExchangeCodeInput): Promise<To
   body.set('client_id', input.clientId);
   body.set('code_verifier', input.codeVerifier);
   if (input.clientSecret) body.set('client_secret', input.clientSecret);
-  const res = await fetch(input.tokenUrl, {
+  const res = await fetchImpl(input.tokenUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' },
     body: body.toString(),
@@ -37,18 +40,21 @@ export async function exchangeCodeForToken(input: ExchangeCodeInput): Promise<To
  * not; Auth0 with rotation does). Caller should preserve the prior
  * refresh_token if the response omits one.
  */
-export async function refreshAccessToken(input: {
-  readonly tokenUrl: string;
-  readonly clientId: string;
-  readonly clientSecret?: string;
-  readonly refreshToken: string;
-}): Promise<TokenSet> {
+export async function refreshAccessToken(
+  input: {
+    readonly tokenUrl: string;
+    readonly clientId: string;
+    readonly clientSecret?: string;
+    readonly refreshToken: string;
+  },
+  fetchImpl: typeof fetch = fetch,
+): Promise<TokenSet> {
   const body = new URLSearchParams();
   body.set('grant_type', 'refresh_token');
   body.set('refresh_token', input.refreshToken);
   body.set('client_id', input.clientId);
   if (input.clientSecret) body.set('client_secret', input.clientSecret);
-  const res = await fetch(input.tokenUrl, {
+  const res = await fetchImpl(input.tokenUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' },
     body: body.toString(),

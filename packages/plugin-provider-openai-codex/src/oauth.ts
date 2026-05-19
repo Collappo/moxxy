@@ -1,6 +1,19 @@
+/**
+ * Codex-specific OAuth pieces: constants, JWT-claim extraction, and thin
+ * wrappers that adapt `@moxxy/plugin-oauth`'s generic helpers into the
+ * `CodexTokens` shape the provider class consumes. The actual flow
+ * orchestration lives in `profile.ts` + `login.ts`.
+ */
+
 import { Buffer } from 'node:buffer';
 import { webcrypto } from 'node:crypto';
-import type { CodexTokens, OAuthTokenResponse, PkceCodes } from './types.js';
+import {
+  buildAuthUrl,
+  exchangeCodeForToken as oauthExchangeCodeForToken,
+  refreshAccessToken,
+  type TokenSet,
+} from '@moxxy/plugin-oauth';
+import type { CodexTokens, PkceCodes } from './types.js';
 
 /**
  * Public OAuth client id baked into the first-party Codex / OpenCode clients.
@@ -44,23 +57,25 @@ export function generateState(): string {
   return base64UrlEncode(webcrypto.getRandomValues(new Uint8Array(32)));
 }
 
+/**
+ * Thin wrapper over `@moxxy/plugin-oauth`'s generic `buildAuthUrl` that
+ * stamps in the Codex-specific extras. Exported because tests + downstream
+ * consumers may want to build URLs without running the full flow.
+ */
 export function buildAuthorizeUrl(redirectUri: string, pkce: PkceCodes, state: string): string {
-  const params = new URLSearchParams({
-    response_type: 'code',
-    client_id: CLIENT_ID,
-    redirect_uri: redirectUri,
-    scope: SCOPES,
-    code_challenge: pkce.challenge,
-    code_challenge_method: 'S256',
-    // These two flags are what codex-rs / opencode pass; without them the
-    // returned id_token won't carry the chatgpt_account_id / organizations
-    // claims we need to populate the ChatGPT-Account-Id header.
-    id_token_add_organizations: 'true',
-    codex_cli_simplified_flow: 'true',
+  return buildAuthUrl({
+    authUrl: AUTHORIZE_URL,
+    clientId: CLIENT_ID,
+    redirectUri,
+    scopes: SCOPES.split(' '),
+    codeChallenge: pkce.challenge,
     state,
-    originator: ORIGINATOR,
+    extraAuthParams: {
+      id_token_add_organizations: 'true',
+      codex_cli_simplified_flow: 'true',
+      originator: ORIGINATOR,
+    },
   });
-  return `${AUTHORIZE_URL}?${params.toString()}`;
 }
 
 /**
@@ -116,130 +131,45 @@ export function extractAccountId(tokens: AccountIdSource): string | undefined {
   return undefined;
 }
 
-async function postToken(body: URLSearchParams, fetchImpl: typeof fetch): Promise<OAuthTokenResponse> {
-  const response = await fetchImpl(TOKEN_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: body.toString(),
-  });
-  if (!response.ok) {
-    const text = await response.text().catch(() => '');
-    throw new Error(`Token endpoint returned ${response.status}: ${text || response.statusText}`);
+function toCodexTokens(set: TokenSet): CodexTokens {
+  if (!set.refreshToken) {
+    throw new Error('OAuth token response missing refresh_token');
   }
-  return (await response.json()) as OAuthTokenResponse;
+  const accountId = extractAccountId({
+    ...(set.idToken ? { id_token: set.idToken } : {}),
+    access_token: set.accessToken,
+  });
+  return {
+    access: set.accessToken,
+    refresh: set.refreshToken,
+    expires: set.expiresAt ?? Date.now() + 3600_000,
+    ...(accountId ? { accountId } : {}),
+  };
 }
 
-function normalizeTokens(raw: OAuthTokenResponse, now: number = Date.now()): CodexTokens {
-  const expires = now + (raw.expires_in ?? 3600) * 1000;
-  const accountId = extractAccountId({ id_token: raw.id_token, access_token: raw.access_token });
-  return accountId
-    ? { access: raw.access_token, refresh: raw.refresh_token, expires, accountId }
-    : { access: raw.access_token, refresh: raw.refresh_token, expires };
-}
-
+/**
+ * Wrapper around plugin-oauth's `exchangeCodeForToken` that returns the
+ * `CodexTokens` shape (with `accountId` plucked from the id_token JWT).
+ * Tests + downstream callers use it directly; the live login path goes
+ * through `runOauthLogin(codexOauthProfile, ...)`.
+ */
 export async function exchangeCodeForTokens(
   code: string,
   redirectUri: string,
   pkce: PkceCodes,
   fetchImpl: typeof fetch = fetch,
 ): Promise<CodexTokens> {
-  const body = new URLSearchParams({
-    grant_type: 'authorization_code',
-    code,
-    redirect_uri: redirectUri,
-    client_id: CLIENT_ID,
-    code_verifier: pkce.verifier,
-  });
-  return normalizeTokens(await postToken(body, fetchImpl));
-}
-
-/**
- * Device-authorization start: returns a short user code the user enters at
- * https://auth.openai.com/codex/device on any browser-capable device.
- * Used by the headless login path (no-TTY or `--no-browser`) so SSH
- * sessions / CI / docker containers can sign in without a local browser.
- *
- * Mirrors opencode's "ChatGPT Pro/Plus (headless)" auth method.
- */
-export interface DeviceAuthInit {
-  readonly deviceAuthId: string;
-  readonly userCode: string;
-  readonly verificationUri: string;
-  readonly intervalMs: number;
-}
-
-export async function startDeviceAuth(fetchImpl: typeof fetch = fetch): Promise<DeviceAuthInit> {
-  const response = await fetchImpl(`${ISSUER}/api/accounts/deviceauth/usercode`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ client_id: CLIENT_ID }),
-  });
-  if (!response.ok) {
-    const text = await response.text().catch(() => '');
-    throw new Error(`Device auth init failed: ${response.status} ${text || response.statusText}`);
-  }
-  const data = (await response.json()) as {
-    device_auth_id: string;
-    user_code: string;
-    interval?: string | number;
-  };
-  const intervalSec = Math.max(typeof data.interval === 'string' ? parseInt(data.interval, 10) : data.interval ?? 5, 1);
-  return {
-    deviceAuthId: data.device_auth_id,
-    userCode: data.user_code,
-    verificationUri: `${ISSUER}/codex/device`,
-    intervalMs: intervalSec * 1000,
-  };
-}
-
-/**
- * Polls the device-auth token endpoint until the user finishes the browser
- * step. 403/404 → "still waiting, try again after `interval`". Any other
- * non-2xx → fatal. On success, exchanges the returned authorization_code
- * for real tokens via the standard /oauth/token endpoint.
- *
- * Polls are throttled by `intervalMs + safetyMarginMs` to stay clear of
- * the server's rate limit. Times out after `timeoutMs`.
- */
-export async function pollDeviceAuth(
-  init: DeviceAuthInit,
-  opts: { timeoutMs: number; safetyMarginMs?: number; signal?: AbortSignal } = { timeoutMs: 10 * 60 * 1000 },
-  fetchImpl: typeof fetch = fetch,
-): Promise<CodexTokens> {
-  const safety = opts.safetyMarginMs ?? 3000;
-  const deadline = Date.now() + opts.timeoutMs;
-  while (Date.now() < deadline) {
-    if (opts.signal?.aborted) throw new Error('Device auth polling aborted');
-    const response = await fetchImpl(`${ISSUER}/api/accounts/deviceauth/token`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ device_auth_id: init.deviceAuthId, user_code: init.userCode }),
-    });
-    if (response.ok) {
-      const data = (await response.json()) as {
-        authorization_code: string;
-        code_verifier: string;
-      };
-      // Exchange the server-side authorization_code + verifier for the
-      // real OAuth bundle. The redirect_uri here is the device-auth
-      // callback the issuer expects — it's not actually a redirect target
-      // we listen on, just a value that must match what the server bound.
-      const tokenBody = new URLSearchParams({
-        grant_type: 'authorization_code',
-        code: data.authorization_code,
-        redirect_uri: `${ISSUER}/deviceauth/callback`,
-        client_id: CLIENT_ID,
-        code_verifier: data.code_verifier,
-      });
-      return normalizeTokens(await postToken(tokenBody, fetchImpl));
-    }
-    if (response.status !== 403 && response.status !== 404) {
-      const text = await response.text().catch(() => '');
-      throw new Error(`Device auth poll failed: ${response.status} ${text || response.statusText}`);
-    }
-    await new Promise((r) => setTimeout(r, init.intervalMs + safety));
-  }
-  throw new Error('Device auth timed out — re-run `moxxy login openai-codex`');
+  const set = await oauthExchangeCodeForToken(
+    {
+      tokenUrl: TOKEN_URL,
+      code,
+      redirectUri,
+      clientId: CLIENT_ID,
+      codeVerifier: pkce.verifier,
+    },
+    fetchImpl,
+  );
+  return toCodexTokens(set);
 }
 
 /**
@@ -252,10 +182,11 @@ export async function refreshTokens(
   refreshToken: string,
   fetchImpl: typeof fetch = fetch,
 ): Promise<CodexTokens> {
-  const body = new URLSearchParams({
-    grant_type: 'refresh_token',
-    refresh_token: refreshToken,
-    client_id: CLIENT_ID,
-  });
-  return normalizeTokens(await postToken(body, fetchImpl));
+  const set = await refreshAccessToken(
+    { tokenUrl: TOKEN_URL, clientId: CLIENT_ID, refreshToken },
+    fetchImpl,
+  );
+  return toCodexTokens(
+    set.refreshToken ? set : { ...set, refreshToken },
+  );
 }

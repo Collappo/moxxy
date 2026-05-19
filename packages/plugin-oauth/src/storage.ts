@@ -1,4 +1,3 @@
-import type { VaultStore } from '@moxxy/plugin-vault';
 import type { TokenSet } from './flow.js';
 
 /**
@@ -12,12 +11,24 @@ import type { TokenSet } from './flow.js';
  *   oauth/<provider>/client_id       (so refresh doesn't need the model to re-pass it)
  *   oauth/<provider>/client_secret   (confidential clients only)
  *   oauth/<provider>/token_url       (so refresh works without re-supplying)
+ *   oauth/<provider>/extras          (JSON map of provider-specific fields, e.g. account_id)
  *
  * Provider names are namespaced with a `/` so the vault's `list-by-tag`
  * UI groups them. Provider names MUST be `[a-z0-9._-]+`; the schema in
  * the tool layer enforces this.
  */
 const PROVIDER_RE = /^[a-z0-9._-]+$/;
+
+/**
+ * Minimal vault shape this module uses. Both `@moxxy/plugin-vault`'s
+ * `VaultStore` and the SDK's `ProviderVault` structurally satisfy it, so
+ * callers can pass whichever they hold.
+ */
+export interface OAuthVault {
+  get(key: string): Promise<string | null>;
+  set(key: string, value: string, tags?: ReadonlyArray<string>): Promise<void>;
+  delete?(key: string): Promise<boolean>;
+}
 
 export function validateProvider(name: string): void {
   if (!PROVIDER_RE.test(name)) {
@@ -27,18 +38,31 @@ export function validateProvider(name: string): void {
   }
 }
 
+export interface StoreTokenSetMeta {
+  readonly clientId: string;
+  readonly clientSecret?: string;
+  readonly tokenUrl: string;
+  /**
+   * Provider-specific extras the framework persists alongside the token
+   * set. Used for fields like `account_id`, `org_id`, `team_slug` that
+   * don't fit `TokenSet` but the caller wants to recover later.
+   */
+  readonly extras?: Readonly<Record<string, string>>;
+}
+
 export interface StoredCreds {
   readonly tokenSet: TokenSet;
   readonly clientId: string;
   readonly clientSecret: string | null;
   readonly tokenUrl: string;
+  readonly extras: Readonly<Record<string, string>>;
 }
 
 export async function storeTokenSet(
-  vault: VaultStore,
+  vault: OAuthVault,
   provider: string,
   tokens: TokenSet,
-  setupMeta: { clientId: string; clientSecret?: string; tokenUrl: string },
+  meta: StoreTokenSetMeta,
 ): Promise<void> {
   validateProvider(provider);
   const tag = `oauth:${provider}`;
@@ -57,15 +81,18 @@ export async function storeTokenSet(
   if (tokens.idToken !== undefined) {
     await vault.set(`${base}/id_token`, tokens.idToken, [tag]);
   }
-  await vault.set(`${base}/client_id`, setupMeta.clientId, [tag]);
-  if (setupMeta.clientSecret) {
-    await vault.set(`${base}/client_secret`, setupMeta.clientSecret, [tag]);
+  await vault.set(`${base}/client_id`, meta.clientId, [tag]);
+  if (meta.clientSecret) {
+    await vault.set(`${base}/client_secret`, meta.clientSecret, [tag]);
   }
-  await vault.set(`${base}/token_url`, setupMeta.tokenUrl, [tag]);
+  await vault.set(`${base}/token_url`, meta.tokenUrl, [tag]);
+  if (meta.extras && Object.keys(meta.extras).length > 0) {
+    await vault.set(`${base}/extras`, JSON.stringify(meta.extras), [tag]);
+  }
 }
 
 export async function readStoredCreds(
-  vault: VaultStore,
+  vault: OAuthVault,
   provider: string,
 ): Promise<StoredCreds | null> {
   validateProvider(provider);
@@ -80,6 +107,7 @@ export async function readStoredCreds(
   const clientId = await vault.get(`${base}/client_id`);
   const clientSecret = await vault.get(`${base}/client_secret`);
   const tokenUrl = await vault.get(`${base}/token_url`);
+  const extrasRaw = await vault.get(`${base}/extras`);
   if (!clientId || !tokenUrl) {
     // Missing setup-meta means a partial store — refresh impossible. Treat as absent.
     return null;
@@ -96,10 +124,11 @@ export async function readStoredCreds(
     clientId,
     clientSecret,
     tokenUrl,
+    extras: parseExtras(extrasRaw),
   };
 }
 
-export async function clearStoredCreds(vault: VaultStore, provider: string): Promise<number> {
+export async function clearStoredCreds(vault: OAuthVault, provider: string): Promise<number> {
   validateProvider(provider);
   const base = `oauth/${provider}`;
   const keys = [
@@ -112,10 +141,11 @@ export async function clearStoredCreds(vault: VaultStore, provider: string): Pro
     `${base}/client_id`,
     `${base}/client_secret`,
     `${base}/token_url`,
+    `${base}/extras`,
   ];
   let removed = 0;
   for (const k of keys) {
-    if (await vault.delete(k)) removed += 1;
+    if (await vault.delete?.(k)) removed += 1;
   }
   return removed;
 }
@@ -124,4 +154,19 @@ export async function clearStoredCreds(vault: VaultStore, provider: string): Pro
 export function isExpired(tokens: TokenSet, skewMs = 60_000): boolean {
   if (tokens.expiresAt === undefined) return false;
   return Date.now() + skewMs >= tokens.expiresAt;
+}
+
+function parseExtras(raw: string | null): Readonly<Record<string, string>> {
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    const out: Record<string, string> = {};
+    for (const [k, v] of Object.entries(parsed)) {
+      if (typeof v === 'string') out[k] = v;
+    }
+    return out;
+  } catch {
+    return {};
+  }
 }

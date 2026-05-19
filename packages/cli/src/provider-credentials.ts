@@ -1,20 +1,17 @@
 import type { VaultStore } from '@moxxy/plugin-vault';
 import {
-  CODEX_VAULT_KEY,
+  persistCodexTokens,
+  readStoredTokens,
   type CodexTokens,
 } from '@moxxy/plugin-provider-openai-codex';
 import { resolveProviderApiKey, type ResolveOptions } from './provider-keys.js';
 
-// Re-export so existing CLI imports (`./provider-credentials`) keep working.
-// The single source of truth lives in the codex plugin now.
-export { CODEX_VAULT_KEY };
-
 /**
  * Provider-aware credential resolution. The existing API-key flow (vault →
  * env → prompt) is unchanged for all providers EXCEPT `openai-codex`, which
- * pulls a JSON OAuth bundle from the vault and exposes both the tokens AND
- * a writeback callback that persists refreshed tokens before the next API
- * call goes out.
+ * pulls the OAuth token bundle from the vault (under `oauth/openai-codex/*`)
+ * and exposes both the tokens AND a writeback callback that persists
+ * refreshed tokens before the next API call goes out.
  */
 export async function resolveProviderCredentials(
   providerName: string,
@@ -27,34 +24,22 @@ export async function resolveProviderCredentials(
 }
 
 async function resolveOAuthCodex(vault: VaultStore): Promise<Record<string, unknown>> {
-  let raw: string | null = null;
+  let tokens: CodexTokens | null = null;
   try {
-    raw = await vault.get(CODEX_VAULT_KEY);
+    tokens = await readStoredTokens(vault);
   } catch {
-    // Vault couldn't open — treat as "no credentials" and surface the
-    // login hint below.
-    raw = null;
+    tokens = null;
   }
-  if (!raw) {
+  if (!tokens) {
     throw new Error(
       `No ChatGPT OAuth credentials found in the vault. ` +
         `Run \`moxxy login openai-codex\` to sign in with your ChatGPT Pro/Plus account.`,
     );
   }
-  let tokens: CodexTokens;
-  try {
-    tokens = JSON.parse(raw) as CodexTokens;
-  } catch (err) {
-    throw new Error(
-      `Stored ChatGPT credentials are corrupt — run \`moxxy login openai-codex\` to refresh. ` +
-        `(${err instanceof Error ? err.message : String(err)})`,
-    );
-  }
   return {
     tokens,
     onTokensRefreshed: async (next: CodexTokens) => {
-      await vault.set(CODEX_VAULT_KEY, JSON.stringify(next), ['openai-codex', 'oauth']);
+      await persistCodexTokens(vault, next);
     },
   };
 }
-

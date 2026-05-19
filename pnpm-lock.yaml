@@ -833,6 +833,9 @@ importers:
 
   packages/plugin-provider-openai-codex:
     dependencies:
+      '@moxxy/plugin-oauth':
+        specifier: workspace:*
+        version: link:../plugin-oauth
       '@moxxy/sdk':
         specifier: workspace:*
         version: link:../sdk

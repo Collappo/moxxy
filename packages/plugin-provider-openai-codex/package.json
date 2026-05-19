@@ -20,7 +20,8 @@
   },
   "moxxy": { "plugin": { "entry": "./dist/index.js", "kind": "provider" } },
   "dependencies": {
-    "@moxxy/sdk": "workspace:*"
+    "@moxxy/sdk": "workspace:*",
+    "@moxxy/plugin-oauth": "workspace:*"
   },
   "devDependencies": {
     "@moxxy/tsconfig": "workspace:*",

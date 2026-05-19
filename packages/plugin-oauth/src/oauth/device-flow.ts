@@ -1,5 +1,8 @@
+import { pollUntil, type PollOutcome } from './poll-until.js';
 import { parseTokenResponse } from './token-exchange.js';
 import type { DeviceFlowOptions, TokenSet } from './types.js';
+
+const DEVICE_POLL_SAFETY_MARGIN_MS = 0;
 
 /**
  * Run the RFC 8628 device-authorization flow. Suitable for headless
@@ -49,9 +52,11 @@ export async function runDeviceCodeFlow(opts: DeviceFlowOptions): Promise<TokenS
       ? deviceJson.verification_uri_complete
       : undefined;
   const expiresIn = typeof deviceJson.expires_in === 'number' ? deviceJson.expires_in : 600;
-  let interval = typeof deviceJson.interval === 'number' ? deviceJson.interval : 5;
+  const interval = typeof deviceJson.interval === 'number' ? deviceJson.interval : 5;
   if (!deviceCode || !userCode || !verificationUri) {
-    throw new Error(`device-code response missing required fields: ${JSON.stringify(deviceJson).slice(0, 200)}`);
+    throw new Error(
+      `device-code response missing required fields: ${JSON.stringify(deviceJson).slice(0, 200)}`,
+    );
   }
 
   opts.onPrompt({
@@ -62,47 +67,44 @@ export async function runDeviceCodeFlow(opts: DeviceFlowOptions): Promise<TokenS
     interval,
   });
 
-  const deadline = Date.now() + Math.min((opts.timeoutMs ?? expiresIn * 1000), expiresIn * 1000);
-
-  while (Date.now() < deadline) {
-    if (opts.signal?.aborted) throw new Error('OAuth device flow aborted');
-    await sleep(interval * 1000, opts.signal);
-    const body = new URLSearchParams();
-    body.set('grant_type', 'urn:ietf:params:oauth:grant-type:device_code');
-    body.set('device_code', deviceCode);
-    body.set('client_id', opts.clientId);
-    if (opts.clientSecret) body.set('client_secret', opts.clientSecret);
-    const pollRes = await fetch(opts.tokenUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' },
-      body: body.toString(),
-    });
-    const pollJson = (await pollRes.json().catch(() => ({}))) as Record<string, unknown>;
-    if (pollRes.ok && typeof pollJson.access_token === 'string') {
-      return parseTokenResponse(pollJson);
-    }
-    const err = typeof pollJson.error === 'string' ? pollJson.error : `HTTP ${pollRes.status}`;
-    if (err === 'authorization_pending') continue;
-    if (err === 'slow_down') {
-      interval += 5;
-      continue;
-    }
-    if (err === 'access_denied') throw new Error('OAuth device flow: user denied authorization');
-    if (err === 'expired_token') throw new Error('OAuth device flow: device_code expired before approval');
-    const desc = typeof pollJson.error_description === 'string' ? pollJson.error_description : '';
-    throw new Error(`OAuth device flow failed: ${err}${desc ? ` — ${desc}` : ''}`);
-  }
-  throw new Error('OAuth device flow timed out waiting for user approval');
+  return pollUntil((state) => pollOnce(opts, deviceCode, state), {
+    intervalMs: interval * 1000 + DEVICE_POLL_SAFETY_MARGIN_MS,
+    timeoutMs: Math.min(opts.timeoutMs ?? expiresIn * 1000, expiresIn * 1000),
+    label: 'OAuth device flow',
+    leadingWait: true,
+    ...(opts.signal ? { signal: opts.signal } : {}),
+  });
 }
 
-function sleep(ms: number, signal?: AbortSignal): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (signal?.aborted) return reject(new Error('aborted'));
-    const t = setTimeout(resolve, ms);
-    const onAbort = (): void => {
-      clearTimeout(t);
-      reject(new Error('aborted'));
-    };
-    signal?.addEventListener('abort', onAbort, { once: true });
+async function pollOnce(
+  opts: DeviceFlowOptions,
+  deviceCode: string,
+  state: { intervalMs: number },
+): Promise<PollOutcome<TokenSet>> {
+  const body = new URLSearchParams();
+  body.set('grant_type', 'urn:ietf:params:oauth:grant-type:device_code');
+  body.set('device_code', deviceCode);
+  body.set('client_id', opts.clientId);
+  if (opts.clientSecret) body.set('client_secret', opts.clientSecret);
+  const pollRes = await fetch(opts.tokenUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' },
+    body: body.toString(),
   });
+  const pollJson = (await pollRes.json().catch(() => ({}))) as Record<string, unknown>;
+  if (pollRes.ok && typeof pollJson.access_token === 'string') {
+    return { done: parseTokenResponse(pollJson) };
+  }
+  const err = typeof pollJson.error === 'string' ? pollJson.error : `HTTP ${pollRes.status}`;
+  if (err === 'authorization_pending') return { pending: true };
+  if (err === 'slow_down') {
+    state.intervalMs += 5000;
+    return { pending: true };
+  }
+  if (err === 'access_denied') throw new Error('OAuth device flow: user denied authorization');
+  if (err === 'expired_token') {
+    throw new Error('OAuth device flow: device_code expired before approval');
+  }
+  const desc = typeof pollJson.error_description === 'string' ? pollJson.error_description : '';
+  throw new Error(`OAuth device flow failed: ${err}${desc ? ` — ${desc}` : ''}`);
 }
