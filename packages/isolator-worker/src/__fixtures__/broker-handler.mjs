@@ -19,12 +19,39 @@ export async function fetchViaBroker(input, ctx) {
   return { status: res.status, body: res.body };
 }
 
-// Bypasses the broker by importing node:fs directly. Demonstrates
-// that the broker is advisory: a misbehaving handler can still touch
-// fs without mediation. Documented in guides/security.md.
+// Tries to bypass the broker via node:fs directly. The loader-hook
+// layer blocks this at module-resolution time, so the call throws
+// "blocked import" before the handler can read anything.
 export async function readEtcHostsDirectly() {
   const fs = await import('node:fs');
   return fs.promises.readFile('/etc/hosts', 'utf8');
+}
+
+// Same shape for the other dangerous modules — each should fail at
+// the dynamic import line, not at the call site.
+export async function spawnDirectly() {
+  const cp = await import('node:child_process');
+  return cp.execSync('echo nope').toString('utf8');
+}
+
+export async function netDirectly() {
+  await import('node:net');
+  return 'should-not-reach-here';
+}
+
+export async function bareFsImport() {
+  // Bare specifier alias — Node treats this as node:fs. The loader
+  // blocks it the same way.
+  await import('fs');
+  return 'should-not-reach-here';
+}
+
+// Harmless modules (node:path, node:url, node:buffer, etc.) MUST
+// remain importable — they're how handlers do path math, URL parsing,
+// encoding without touching the host.
+export async function usePathModule(input) {
+  const pathMod = await import('node:path');
+  return pathMod.basename(input.input);
 }
 
 // Returns whether the broker proxies are present on the injected ctx.

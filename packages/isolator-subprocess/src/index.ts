@@ -1,8 +1,9 @@
-import { spawn, type ChildProcess } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import type { Isolator } from '@moxxy/sdk';
 import {
   checkAllCaps,
   handleBrokerRequest,
+  LOADER_HOOK_SOURCE,
   type BrokerRequest,
 } from '@moxxy/plugin-security';
 
@@ -35,6 +36,7 @@ import {
  */
 const SHIM_SOURCE = String.raw`
 import { stdin, stdout } from 'node:process';
+import { register } from 'node:module';
 
 let buffer = '';
 let nextId = 1;
@@ -94,7 +96,11 @@ stdin.on('data', (chunk) => {
 });
 
 async function runTask() {
-  const { moduleUrl, exportName, input, syntheticCtx } = task;
+  const { moduleUrl, exportName, input, syntheticCtx, loaderUrl } = task;
+  // Block dangerous imports inside the handler module. Static
+  // imports above (node:process, node:module) ran before register()
+  // and are not affected.
+  register(loaderUrl, import.meta.url);
   const mod = await import(moduleUrl);
   const fn = mod[exportName];
   if (typeof fn !== 'function') {
@@ -257,6 +263,8 @@ export function createSubprocessIsolator(opts: SubprocessIsolatorOptions = {}): 
             callId: call.callId,
             cwd: call.cwd,
           },
+          loaderUrl:
+            'data:text/javascript,' + encodeURIComponent(LOADER_HOOK_SOURCE),
         };
         try {
           child.stdin.write(JSON.stringify(task) + '\n');

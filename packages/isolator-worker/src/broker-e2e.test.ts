@@ -201,22 +201,68 @@ describe('worker broker: ctx.fetch mediation', () => {
   });
 });
 
-describe('worker broker: advisory limit (documented)', () => {
-  // The broker only mediates calls that go through ctx.fs / ctx.fetch.
-  // Handlers that import `node:fs` directly bypass it. We lock this in
-  // as a regression test: if a future loader-hook layer makes this
-  // start failing, the test goes red on purpose and the doc updates.
-  it('lets handlers bypass the broker via node:fs directly', async () => {
+describe('worker broker: loader-hook layer', () => {
+  // The loader-hook layer registers an ESM resolver inside the worker
+  // that throws on dangerous Node module imports BEFORE the handler
+  // module loads. Combined with the broker for opt-in fs/net/exec,
+  // this closes the "advisory" gap: a handler can NO LONGER bypass
+  // the broker by importing node:fs directly.
+  it('blocks handlers that try to import node:fs directly', async () => {
     const iso = createWorkerIsolator();
-    // Cap says read /tmp/** only. The handler reads /etc/hosts via
-    // node:fs directly — outside the cap, but not mediated.
+    await expect(
+      iso.run(
+        baseCall('readEtcHostsDirectly', {}),
+        async () => 'unused',
+        { fs: { read: ['/tmp/**'] } },
+        new AbortController().signal,
+      ),
+    ).rejects.toThrow(/blocked import: node:fs/);
+  });
+
+  it('blocks node:child_process', async () => {
+    const iso = createWorkerIsolator();
+    await expect(
+      iso.run(
+        baseCall('spawnDirectly', {}),
+        async () => 'unused',
+        {},
+        new AbortController().signal,
+      ),
+    ).rejects.toThrow(/blocked import: node:child_process/);
+  });
+
+  it('blocks node:net', async () => {
+    const iso = createWorkerIsolator();
+    await expect(
+      iso.run(
+        baseCall('netDirectly', {}),
+        async () => 'unused',
+        {},
+        new AbortController().signal,
+      ),
+    ).rejects.toThrow(/blocked import: node:net/);
+  });
+
+  it('blocks bare specifiers (no node: prefix)', async () => {
+    const iso = createWorkerIsolator();
+    await expect(
+      iso.run(
+        baseCall('bareFsImport', {}),
+        async () => 'unused',
+        {},
+        new AbortController().signal,
+      ),
+    ).rejects.toThrow(/blocked import: fs/);
+  });
+
+  it('does NOT block harmless modules like node:path or node:url', async () => {
+    const iso = createWorkerIsolator();
     const out = await iso.run(
-      baseCall('readEtcHostsDirectly', {}),
+      baseCall('usePathModule', { input: '/tmp/foo/bar.txt' }),
       async () => 'unused',
-      { fs: { read: ['/tmp/**'] } },
+      {},
       new AbortController().signal,
     );
-    expect(typeof out).toBe('string');
-    expect(out.length).toBeGreaterThan(0);
+    expect(out).toBe('bar.txt');
   });
 });

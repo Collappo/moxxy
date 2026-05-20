@@ -43,12 +43,14 @@ const iso = createSubprocessIsolator({
 - **Wall-clock** — `caps.timeMs` via `setTimeout` → `child.kill('SIGTERM')`.
 - **Abort** — parent's `ctx.signal` → `child.kill('SIGTERM')`.
 - **Broker ops** — same surface as `worker`: `fs.{readFile,writeFile,readdir,stat}`, `fetch`, `exec`. Each call re-validated against caps on the parent side.
+- **Loader-hook layer** — `node:fs`, `node:child_process`, `node:net`,
+  and similar dangerous modules are blocked from the handler's import
+  graph. A handler that tries `import('node:fs')` throws at module
+  resolution; the broker (`ctx.fs.readFile`) is the only path to
+  filesystem access.
 
 ## What it does NOT enforce
 
-- **Direct `node:fs` / `node:child_process` imports** inside the child
-  still bypass the broker. Same advisory limit as the worker isolator.
-  A loader-hook layer to block this is a future iteration.
 - **No ulimit / cgroup / namespace setup** — the child is a regular
   Node process. If you need stronger sandboxing, use a wasm handler
   (no Node APIs at all) or wrap your tool binary in the OS-level

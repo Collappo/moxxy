@@ -147,3 +147,60 @@ describe('subprocessIsolator', () => {
     expect(out.stdout).toContain('subproc-exec');
   });
 });
+
+describe('subprocess loader-hook layer', () => {
+  it('blocks node:fs imports inside the child', async () => {
+    const iso = createSubprocessIsolator();
+    await expect(
+      iso.run(
+        baseCall('readEtcHostsDirectly', {}, {
+          moduleRef: { url: fixtureUrl, export: 'readEtcHostsDirectly' },
+        }),
+        async () => 'unused',
+        {},
+        new AbortController().signal,
+      ),
+    ).rejects.toThrow(/blocked import: node:fs/);
+  });
+
+  it('blocks node:child_process', async () => {
+    const iso = createSubprocessIsolator();
+    await expect(
+      iso.run(
+        baseCall('spawnDirectly', {}, {
+          moduleRef: { url: fixtureUrl, export: 'spawnDirectly' },
+        }),
+        async () => 'unused',
+        {},
+        new AbortController().signal,
+      ),
+    ).rejects.toThrow(/blocked import: node:child_process/);
+  });
+
+  it('blocks bare specifier (fs)', async () => {
+    const iso = createSubprocessIsolator();
+    await expect(
+      iso.run(
+        baseCall('bareFsImport', {}, {
+          moduleRef: { url: fixtureUrl, export: 'bareFsImport' },
+        }),
+        async () => 'unused',
+        {},
+        new AbortController().signal,
+      ),
+    ).rejects.toThrow(/blocked import: fs/);
+  });
+
+  it('does NOT block harmless modules (node:path)', async () => {
+    const iso = createSubprocessIsolator();
+    const out = await iso.run(
+      baseCall('usePathModule', { input: '/tmp/x/y.txt' }, {
+        moduleRef: { url: fixtureUrl, export: 'usePathModule' },
+      }),
+      async () => 'unused',
+      {},
+      new AbortController().signal,
+    );
+    expect(out).toBe('y.txt');
+  });
+});

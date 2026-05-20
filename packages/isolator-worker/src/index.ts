@@ -3,6 +3,7 @@ import type { Isolator } from '@moxxy/sdk';
 import {
   checkAllCaps,
   handleBrokerRequest,
+  LOADER_HOOK_SOURCE,
   type BrokerRequest,
 } from '@moxxy/plugin-security';
 
@@ -30,7 +31,15 @@ import {
  */
 const SHIM_SOURCE = `
 const { parentPort, workerData } = await import('node:worker_threads');
-const { moduleUrl, exportName, input, syntheticCtx } = workerData;
+const { moduleUrl, exportName, input, syntheticCtx, loaderUrl } = workerData;
+// Register the import-blocking loader BEFORE the handler module
+// loads. Subsequent imports (including the handler's transitive
+// imports) go through this hook; node:fs / node:child_process / raw
+// net throw at resolution time. The shim's own static needs
+// (node:worker_threads, node:module) ran before this line, so they
+// aren't affected.
+const { register } = await import('node:module');
+register(loaderUrl, import.meta.url);
 
 // RPC client state
 let nextId = 1;
@@ -199,6 +208,8 @@ export function createWorkerIsolator(opts: WorkerIsolatorOptions = {}): Isolator
           callId: call.callId,
           cwd: call.cwd,
         },
+        loaderUrl:
+          'data:text/javascript,' + encodeURIComponent(LOADER_HOOK_SOURCE),
       };
 
       const worker = new Worker(SHIM_SOURCE, {

@@ -38,6 +38,8 @@ export {
 } from './cap-check.js';
 export {
   handleBrokerRequest,
+  BLOCKED_HANDLER_MODULES,
+  LOADER_HOOK_SOURCE,
   type BrokerOp,
   type BrokerRequest,
   type BrokerResponse,

@@ -284,36 +284,38 @@ that actually meets your need.
 - Enforce memory ceilings.
 - Provide network-level isolation — the handler can `fetch()` to any host.
 
-**`worker` adds** memory ceiling, true JS-state isolation (no closures
-or globals from main thread), guaranteed termination on abort, and
-**brokered fs (readFile/writeFile/readdir/stat) + fetch + exec** when
-the handler opts in (`ctx.fs` / `ctx.fetch` / `ctx.exec`). **It still
-does NOT:**
-- Block handlers that `import('node:fs')` / `node:child_process` directly
-  and bypass the broker. The broker is *advisory*: handlers that want
-  mediation use the injected proxies. Locking this down requires a
-  loader-hook layer; Node has no stable API for it yet.
-- Mediate env — the worker inherits `process.env`.
+**`worker` adds:**
+- Memory ceiling, true JS-state isolation (no closures or globals
+  from the main thread), guaranteed termination on abort.
+- **Brokered fs / fetch / exec** via `ctx.fs` / `ctx.fetch` /
+  `ctx.exec`. Each call re-validated against `caps` on the parent.
+- **Loader-hook layer** that blocks `node:fs`, `node:fs/promises`,
+  `node:child_process`, `node:net`, `node:dgram`, `node:http`,
+  `node:http2`, `node:https`, `node:tls` (and their bare-specifier
+  aliases) from the handler's import graph. A handler cannot bypass
+  the broker by reaching for Node APIs — the import throws at
+  resolution time. Harmless modules (`node:path`, `node:url`,
+  `node:buffer`, etc.) remain available.
 
-**`subprocess` adds** OS-level process boundary (separate VM, separate
-fd table, separate signal mask) and **restrictable env** via `caps.env`.
-Same advisory limit on direct `node:fs` imports.
+**It still does NOT** mediate `process.env` — the worker inherits
+the env at spawn. Tools that need env masking use `subprocess` with
+`caps.env`.
 
-**`wasm` adds** zero ambient authority — modules with no imports
-literally cannot reach the host. **Even direct `node:fs` is unavailable**
-because wasm modules have no access to Node APIs at all. The broker
-imports use synchronous fs / `spawnSync`. **It still does NOT:**
+**`subprocess` adds** OS-level process boundary (separate VM,
+separate fd table, separate signal mask) and **restrictable env**
+via `caps.env`. Same loader-hook layer as worker — `node:fs` and
+friends are blocked from the handler's imports.
+
+**`wasm` adds** zero ambient authority by construction — modules
+have no access to Node APIs whatsoever; only the host functions
+imported via the broker are reachable. The broker imports use
+synchronous fs / `spawnSync`. **It still does NOT:**
 - Support fetch — Node has no safe sync HTTP API. Wasm handlers
-  needing network use the `worker` or `subprocess` isolator instead.
+  needing network use `worker` or `subprocess` instead.
 - Solve the authoring problem — wasm modules must be authored in a
-  language that compiles to wasm. The calling convention is documented
-  in [`@moxxy/isolator-wasm`](/packages/isolator-wasm/) and aligns
-  with what AssemblyScript / wasm-bindgen / TinyGo produce by default.
-
-A future iteration may add a loader-hook layer that blocks direct
-`node:fs` / `node:child_process` from inside worker / subprocess.
-Until then, the broker is the opt-in path for handlers that want
-mediation.
+  language that compiles to wasm. Calling convention documented in
+  [`@moxxy/isolator-wasm`](/packages/isolator-wasm/); aligns with
+  AssemblyScript / wasm-bindgen / TinyGo defaults.
 
 ## Per-tool / per-plugin overrides
 

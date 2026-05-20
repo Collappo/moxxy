@@ -5,6 +5,69 @@ import type { CapabilitySpec } from '@moxxy/sdk';
 import { pathInScope, urlInScope } from './cap-check.js';
 
 /**
+ * Node module specifiers that worker / subprocess isolators must
+ * BLOCK from the handler's import graph. These are the modules whose
+ * existence undermines the broker: a handler that imports `node:fs`
+ * directly can read anywhere the process can, bypassing every
+ * declared `caps.fs` rule.
+ *
+ * The list intentionally covers both `node:` prefixed and bare
+ * specifiers (Node accepts `import 'fs'` and `import 'node:fs'`
+ * interchangeably).
+ *
+ * The list does NOT include modules the shims themselves need
+ * (`node:module`, `node:worker_threads`, `node:process`) — those are
+ * imported by the shim BEFORE the loader is registered, so the
+ * loader never sees them.
+ */
+export const BLOCKED_HANDLER_MODULES: ReadonlyArray<string> = Object.freeze([
+  'node:fs',
+  'node:fs/promises',
+  'node:child_process',
+  'node:net',
+  'node:dgram',
+  'node:http',
+  'node:http2',
+  'node:https',
+  'node:tls',
+  // Bare specifiers (Node treats these as aliases)
+  'fs',
+  'fs/promises',
+  'child_process',
+  'net',
+  'dgram',
+  'http',
+  'http2',
+  'https',
+  'tls',
+]);
+
+/**
+ * Source of an ESM loader hook that throws on any blocked-module
+ * specifier. Encoded into a `data:` URL and registered via
+ * `module.register()` at the start of each worker / subprocess
+ * handler invocation. Inline so the shim doesn't need an extra
+ * file shipped at a stable path.
+ *
+ * The hook only sees imports performed AFTER `register()` is called
+ * — by design, the shim does its own setup (e.g. `import { parentPort
+ * } from 'node:worker_threads'`) before registering the loader, so
+ * the shim's needs are not blocked.
+ */
+export const LOADER_HOOK_SOURCE = `
+const BLOCKED = new Set(${JSON.stringify(BLOCKED_HANDLER_MODULES)});
+export async function resolve(specifier, context, nextResolve) {
+  if (BLOCKED.has(specifier)) {
+    throw new Error(
+      "[security:loader] blocked import: " + specifier +
+      " — use ctx.fs / ctx.fetch / ctx.exec instead of importing Node APIs directly."
+    );
+  }
+  return nextResolve(specifier, context);
+}
+`;
+
+/**
  * Transport-agnostic capability broker. Lives in `@moxxy/plugin-security`
  * because every isolator that brokers (worker, subprocess, wasm) shares
  * the same protocol — only the transport (postMessage, NDJSON over
