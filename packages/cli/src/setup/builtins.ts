@@ -60,6 +60,7 @@ export const BUILTIN_REQUIREMENT_DECISIONS: Readonly<Record<string, BuiltinRequi
   '@moxxy/plugin-provider-anthropic': { hardRequirements: false, reason: 'provider is independently activatable' },
   '@moxxy/plugin-provider-openai': { hardRequirements: false, reason: 'provider is independently activatable' },
   '@moxxy/plugin-provider-openai-codex': { hardRequirements: false, reason: 'provider owns its OAuth flow' },
+  '@moxxy/plugin-provider-admin': { hardRequirements: false, reason: 'provider registry access is injected by bootstrap closure' },
   '@moxxy/tools-builtin': { hardRequirements: false, reason: 'core tool pack has no plugin dependency' },
   '@moxxy/loop-tool-use': { hardRequirements: false, reason: 'loop strategy has no plugin dependency' },
   '@moxxy/loop-plan-execute': { hardRequirements: false, reason: 'loop strategy has no plugin dependency' },
