@@ -59,9 +59,12 @@ export {
   type PluginSkipReason,
   type PluginSkipRecord,
   type PluginSkipSource,
+  type RegisterStaticOptions,
 } from './plugins/host.js';
 export { HookDispatcherImpl } from './plugins/lifecycle.js';
 export { discoverPlugins } from './plugins/discovery.js';
+export { toposortPluginManifests, PluginCycleError } from './plugins/toposort.js';
+export { readPackageMoxxyRequirements } from './plugins/package-requirements.js';
 export { createPluginLoader, type JitiLoaderOptions } from './plugins/loader.js';
 export {
   PermissionEngine,

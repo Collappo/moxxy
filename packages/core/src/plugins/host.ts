@@ -4,6 +4,7 @@ import type {
   CommandDef,
   CompactorDef,
   LoopStrategyDef,
+  MoxxyRequirement,
   Plugin,
   PluginHostHandle,
   ProviderDef,
@@ -25,6 +26,7 @@ import type { TranscriberRegistry } from '../registries/transcribers.js';
 import type { HookDispatcherImpl } from './lifecycle.js';
 import type { RequirementRegistry } from '../requirements.js';
 import { discoverPlugins } from './discovery.js';
+import { toposortPluginManifests, PluginCycleError } from './toposort.js';
 
 export interface PluginHostOptions {
   readonly cwd: string;
@@ -44,6 +46,16 @@ export interface PluginHostOptions {
 
 export interface PluginLoader {
   load(manifest: ResolvedPluginManifest): Promise<Plugin>;
+}
+
+export interface RegisterStaticOptions {
+  /**
+   * Static requirements to enforce before registration. Mirrors the
+   * `moxxy.requirements` field a discovered plugin's package.json would
+   * carry; passed explicitly here because statically-imported builtins
+   * don't go through `discoverPlugins()`.
+   */
+  readonly requirements?: ReadonlyArray<MoxxyRequirement>;
 }
 
 export type PluginSkipSource = 'static' | 'discovered';
@@ -105,11 +117,11 @@ export class PluginHost implements PluginHostHandle {
     return [...this.skipped.values()];
   }
 
-  registerStatic(plugin: Plugin): void {
+  registerStatic(plugin: Plugin, opts: RegisterStaticOptions = {}): void {
     if (this.loaded.has(plugin.name)) {
       throw new Error(`Plugin already registered: ${plugin.name}`);
     }
-    this.assertRequirementsReady(plugin, undefined, 'static');
+    this.assertRequirementsReady(plugin, opts.requirements, 'static');
     const record = this.applyPlugin(plugin);
     this.loaded.set(plugin.name, record);
     this.clearSkip(plugin.name);
@@ -121,7 +133,7 @@ export class PluginHost implements PluginHostHandle {
     if (this.loaded.has(plugin.name)) {
       throw new Error(`Plugin already registered: ${plugin.name}`);
     }
-    this.assertRequirementsReady(plugin, manifest, 'discovered');
+    this.assertRequirementsReady(plugin, manifest.requirements, 'discovered', manifest);
     const record = this.applyPlugin(plugin, manifest);
     this.loaded.set(plugin.name, record);
     this.clearSkip(plugin.name);
@@ -144,7 +156,20 @@ export class PluginHost implements PluginHostHandle {
       );
       return loaded;
     }
-    for (const manifest of manifests) {
+    let ordered: ReadonlyArray<ResolvedPluginManifest>;
+    try {
+      ordered = toposortPluginManifests(manifests);
+    } catch (err) {
+      if (err instanceof PluginCycleError) {
+        this.opts.logger.warn('PluginHost: requirement cycle, falling back to unsorted order', {
+          cycle: err.cycle,
+        });
+        ordered = manifests;
+      } else {
+        throw err;
+      }
+    }
+    for (const manifest of ordered) {
       if (this.loaded.has(manifest.packageName)) continue;
       try {
         const plugin = await loader.load(manifest);
@@ -234,13 +259,11 @@ export class PluginHost implements PluginHostHandle {
 
   private assertRequirementsReady(
     plugin: Plugin,
-    manifest?: ResolvedPluginManifest,
+    requirements: ReadonlyArray<MoxxyRequirement> | undefined,
     source: PluginSkipSource = 'static',
+    manifest?: ResolvedPluginManifest,
   ): void {
-    const requirements = [
-      ...(manifest?.requirements ?? []),
-      ...(plugin.requirements ?? []),
-    ];
+    if (!requirements || requirements.length === 0) return;
     const check = this.opts.requirements.check(requirements);
     if (!check.ready) {
       this.recordRequirementSkip(plugin, source, manifest, check);

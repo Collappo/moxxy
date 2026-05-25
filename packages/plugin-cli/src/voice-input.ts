@@ -1,6 +1,6 @@
 import { Buffer } from 'node:buffer';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
-import type { RequirementCheck, RequirementIssue } from '@moxxy/sdk';
+import { getInstallHint, type RequirementCheck, type RequirementIssue } from '@moxxy/sdk';
 
 export const VOICE_CAPTURE_RUNTIME = 'voice:capture:ffmpeg';
 
@@ -126,7 +126,11 @@ export async function checkVoiceCaptureAvailable(
   });
 }
 
-export function unavailableVoiceCaptureCheck(): RequirementCheck {
+export function unavailableVoiceCaptureCheck(
+  platform: NodeJS.Platform = process.platform,
+): RequirementCheck {
+  const install = getInstallHint('ffmpeg', platform);
+  const hint = `Install via ${install.manager}: \`${install.command}\`.`;
   return {
     ready: false,
     issues: [
@@ -135,11 +139,11 @@ export function unavailableVoiceCaptureCheck(): RequirementCheck {
           kind: 'runtime',
           name: VOICE_CAPTURE_RUNTIME,
           state: 'ready',
-          hint: 'Install ffmpeg and ensure it is available on PATH.',
+          hint,
         },
         code: 'not_ready',
         message: 'ffmpeg is required for voice input',
-        hint: 'Install ffmpeg and ensure it is available on PATH.',
+        hint,
       } satisfies RequirementIssue,
     ],
   };

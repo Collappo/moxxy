@@ -14,7 +14,7 @@ import {
 } from '@moxxy/plugin-vault';
 import {
   buildCodexTranscribeUrl,
-  buildOpenaiCodexSttPlugin,
+  buildWhisperCodexPlugin,
   CodexOAuthTranscriber,
   MOXXY_PCM16_24KHZ_MIME,
   pcm16MonoToWav,
@@ -79,35 +79,13 @@ describe('CodexOAuthTranscriber', () => {
     });
 
     try {
-      const plugin = buildOpenaiCodexSttPlugin({
+      const plugin = buildWhisperCodexPlugin({
         vault,
         baseUrl: server.baseUrl,
         sessionIdProvider: () => 'stt-session-id',
       });
       const def = plugin.transcribers?.[0];
-      expect(plugin.requirements).toEqual([
-        {
-          kind: 'plugin',
-          name: '@moxxy/plugin-provider-openai-codex',
-          state: 'registered',
-          hint: 'Enable @moxxy/plugin-provider-openai-codex.',
-        },
-      ]);
       expect(def?.name).toBe('openai-codex-transcribe');
-      expect(def?.requirements).toEqual([
-        {
-          kind: 'provider',
-          name: 'openai-codex',
-          state: 'active',
-          hint: 'Switch provider to openai-codex.',
-        },
-        {
-          kind: 'runtime',
-          name: 'auth:provider:openai-codex',
-          state: 'ready',
-          hint: 'Run `moxxy login openai-codex`.',
-        },
-      ]);
 
       const transcriber = def!.createClient({});
       const result = await transcriber.transcribe(new Uint8Array([1, 2, 3, 4]), {

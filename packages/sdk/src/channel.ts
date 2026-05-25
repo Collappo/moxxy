@@ -1,5 +1,4 @@
 import type { PermissionResolver } from './permission.js';
-import type { MoxxyRequirement } from './requirements.js';
 
 /**
  * A Channel is a bidirectional surface that drives a Session: it feeds user
@@ -73,7 +72,6 @@ export interface ChannelFactoryDeps {
 export interface ChannelDef<TStartOpts = unknown> {
   readonly name: string;
   readonly description: string;
-  readonly requirements?: ReadonlyArray<MoxxyRequirement>;
   create(deps: ChannelFactoryDeps): Channel<TStartOpts>;
   /**
    * Optional runtime gate. Lets a channel declare "I can only run if these

@@ -15,47 +15,28 @@ export {
   type CodexOAuthTranscriberOptions,
   type CodexOAuthVault,
 } from './transcriber.js';
-export { pcm16MonoToWav } from './wav.js';
+// pcm16MonoToWav was moved into @moxxy/plugin-stt-whisper alongside the
+// rest of the shared audio helpers; re-export it here so older callers
+// that import it from this package keep compiling.
+export { pcm16MonoToWav } from '@moxxy/plugin-stt-whisper';
 
-export interface BuildOpenaiCodexSttPluginOptions {
+export interface BuildWhisperCodexPluginOptions {
   readonly vault: CodexOAuthVault;
   readonly baseUrl?: string;
   readonly fetch?: typeof fetch;
   readonly sessionIdProvider?: () => string;
 }
 
-export function buildOpenaiCodexSttPlugin(
-  opts: BuildOpenaiCodexSttPluginOptions,
+export function buildWhisperCodexPlugin(
+  opts: BuildWhisperCodexPluginOptions,
 ): Plugin {
   return definePlugin({
-    name: '@moxxy/plugin-stt-openai-codex',
+    name: '@moxxy/plugin-stt-whisper-codex',
     version: '0.0.0',
-    requirements: [
-      {
-        kind: 'plugin',
-        name: '@moxxy/plugin-provider-openai-codex',
-        state: 'registered',
-        hint: 'Enable @moxxy/plugin-provider-openai-codex.',
-      },
-    ],
     transcribers: [
       defineTranscriber({
         name: OPENAI_CODEX_TRANSCRIBER_NAME,
         displayName: 'OpenAI Codex transcription (OAuth)',
-        requirements: [
-          {
-            kind: 'provider',
-            name: 'openai-codex',
-            state: 'active',
-            hint: 'Switch provider to openai-codex.',
-          },
-          {
-            kind: 'runtime',
-            name: 'auth:provider:openai-codex',
-            state: 'ready',
-            hint: 'Run `moxxy login openai-codex`.',
-          },
-        ],
         createClient: (config) => {
           const merged: CodexOAuthTranscriberOptions = {
             vault: opts.vault,

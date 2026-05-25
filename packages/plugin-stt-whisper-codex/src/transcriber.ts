@@ -5,6 +5,10 @@ import {
   type CodexTokens,
 } from '@moxxy/plugin-provider-openai-codex';
 import {
+  MOXXY_PCM16_24KHZ_MIME,
+  normalizeWhisperUpload,
+} from '@moxxy/plugin-stt-whisper';
+import {
   classifyHttpStatus,
   classifyNetworkError,
   MoxxyError,
@@ -12,27 +16,13 @@ import {
   type TranscribeOptions,
   type TranscriptionResult,
 } from '@moxxy/sdk';
-import { pcm16MonoToWav } from './wav.js';
 
 export const OPENAI_CODEX_TRANSCRIBER_NAME = 'openai-codex-transcribe';
 export const DEFAULT_CODEX_TRANSCRIBE_BASE_URL = 'https://chatgpt.com';
-export const MOXXY_PCM16_24KHZ_MIME = 'audio/x-moxxy-pcm16-24khz';
+export { MOXXY_PCM16_24KHZ_MIME };
 const CODEX_TRANSCRIBE_ORIGINATOR = 'Codex Desktop';
 const CODEX_TRANSCRIBE_USER_AGENT =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36';
-
-const DEFAULT_FILENAME_BY_MIME: Record<string, string> = {
-  'audio/wav': 'moxxy.wav',
-  'audio/x-wav': 'moxxy.wav',
-  'audio/webm': 'moxxy.webm',
-  'audio/ogg': 'moxxy.ogg',
-  'audio/opus': 'moxxy.opus',
-  'audio/mpeg': 'moxxy.mp3',
-  'audio/mp3': 'moxxy.mp3',
-  'audio/mp4': 'moxxy.mp4',
-  'audio/m4a': 'moxxy.m4a',
-  'audio/flac': 'moxxy.flac',
-};
 
 export interface CodexOAuthVault {
   get(key: string): Promise<string | null>;
@@ -45,12 +35,6 @@ export interface CodexOAuthTranscriberOptions {
   readonly baseUrl?: string;
   readonly fetch?: typeof fetch;
   readonly sessionIdProvider?: () => string;
-}
-
-interface UploadAudio {
-  readonly bytes: Uint8Array;
-  readonly mimeType: string;
-  readonly filename: string;
 }
 
 export class CodexOAuthTranscriber implements Transcriber {
@@ -73,7 +57,7 @@ export class CodexOAuthTranscriber implements Transcriber {
   ): Promise<TranscriptionResult> {
     const tokens = await this.loadTokens();
     const sessionId = this.sessionIdProvider();
-    const upload = normalizeUploadAudio(audio, opts.mimeType);
+    const upload = normalizeWhisperUpload(audio, opts.mimeType, 'moxxy');
     const form = new FormData();
     form.append('file', new File([upload.bytes], upload.filename, { type: upload.mimeType }));
 
@@ -170,19 +154,6 @@ export function buildCodexTranscribeUrl(baseUrl = DEFAULT_CODEX_TRANSCRIBE_BASE_
   url.search = '';
   url.hash = '';
   return url.toString();
-}
-
-function normalizeUploadAudio(audio: Uint8Array | ArrayBuffer, mimeType = 'audio/wav'): UploadAudio {
-  const bytes = audio instanceof Uint8Array ? audio : new Uint8Array(audio);
-  if (mimeType === MOXXY_PCM16_24KHZ_MIME) {
-    return { bytes: pcm16MonoToWav(bytes, 24_000), mimeType: 'audio/wav', filename: 'moxxy.wav' };
-  }
-  const uploadMime = mimeType || 'audio/wav';
-  return {
-    bytes,
-    mimeType: uploadMime,
-    filename: DEFAULT_FILENAME_BY_MIME[uploadMime] ?? 'moxxy.bin',
-  };
 }
 
 function buildCodexTranscribeHeaders(tokens: CodexTokens, sessionId: string): Headers {

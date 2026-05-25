@@ -48,7 +48,7 @@ describe('builtin plugin requirement inventory', () => {
     expect(BUILTIN_REQUIREMENT_DECISIONS['@moxxy/memory-consolidate']).toMatchObject({
       hardRequirements: true,
     });
-    expect(BUILTIN_REQUIREMENT_DECISIONS['@moxxy/plugin-stt-openai-codex']).toMatchObject({
+    expect(BUILTIN_REQUIREMENT_DECISIONS['@moxxy/plugin-stt-whisper-codex']).toMatchObject({
       hardRequirements: true,
     });
   });

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Session } from '@moxxy/core';
-import type { RequirementCheck, RequirementIssue, Transcriber } from '@moxxy/sdk';
+import { getInstallHint, type RequirementCheck, type RequirementIssue, type Transcriber } from '@moxxy/sdk';
 import type { ExternalInsert } from '../components/prompt/external-insert.js';
 import {
   startVoiceRecording,
@@ -21,19 +21,30 @@ export interface UseVoiceInputOptions {
   readonly checkCaptureAvailable?: () => Promise<RequirementCheck>;
 }
 
+export type VoicePhase = 'idle' | 'recording' | 'transcribing';
+
 export interface VoiceInputState {
   readonly externalInsert?: ExternalInsert;
   readonly ready: boolean;
+  /**
+   * Current recording phase. Surfaced so the prompt area can render a
+   * visible badge ('● REC' / 'TRANSCRIBING') without having to mirror
+   * the internal `phaseRef`.
+   */
+  readonly phase: VoicePhase;
   readonly toggleVoiceInput: () => void;
 }
-
-type VoicePhase = 'idle' | 'recording' | 'transcribing';
 
 export function useVoiceInput(opts: UseVoiceInputOptions): VoiceInputState {
   const { session, setSystemNotice } = opts;
   const startRecording = opts.startRecording ?? startVoiceRecording;
   const checkCaptureAvailable = opts.checkCaptureAvailable ?? checkVoiceCaptureAvailable;
   const phaseRef = useRef<VoicePhase>('idle');
+  const [phase, setPhase] = useState<VoicePhase>('idle');
+  const setVoicePhase = useCallback((next: VoicePhase) => {
+    phaseRef.current = next;
+    setPhase(next);
+  }, []);
   const recordingRef = useRef<ActiveVoiceRecording | null>(null);
   const insertIdRef = useRef(0);
   const [externalInsert, setExternalInsert] = useState<ExternalInsert | undefined>();
@@ -68,7 +79,7 @@ export function useVoiceInput(opts: UseVoiceInputOptions): VoiceInputState {
       if (phaseRef.current === 'recording') {
         const recording = recordingRef.current;
         recordingRef.current = null;
-        phaseRef.current = 'transcribing';
+        setVoicePhase('transcribing');
         setSystemNotice('voice: transcribing...');
         try {
           if (!recording) throw new Error('voice recorder is not running');
@@ -89,7 +100,7 @@ export function useVoiceInput(opts: UseVoiceInputOptions): VoiceInputState {
         } catch (err) {
           setSystemNotice(formatVoiceError(err));
         } finally {
-          phaseRef.current = 'idle';
+          setVoicePhase('idle');
         }
         return;
       }
@@ -104,21 +115,25 @@ export function useVoiceInput(opts: UseVoiceInputOptions): VoiceInputState {
           return;
         }
         recordingRef.current = await startRecording();
-        phaseRef.current = 'recording';
+        setVoicePhase('recording');
         setSystemNotice('voice: recording, press Ctrl+R to stop');
       } catch (err) {
         recordingRef.current = null;
-        phaseRef.current = 'idle';
+        setVoicePhase('idle');
         setSystemNotice(formatVoiceError(err));
       }
     })();
-  }, [captureReadiness, session, setSystemNotice, startRecording]);
+  }, [captureReadiness, session, setSystemNotice, setVoicePhase, startRecording]);
 
-  return { externalInsert, ready, toggleVoiceInput };
+  return { externalInsert, ready, phase, toggleVoiceInput };
 }
 
 export function checkCodexVoiceInputReady(session: Session): RequirementCheck {
-  const check = session.requirements.isReady('transcriber', CODEX_TRANSCRIBER_NAME);
+  const check = session.requirements.check([
+    { kind: 'transcriber', name: CODEX_TRANSCRIBER_NAME },
+    { kind: 'provider', name: 'openai-codex', state: 'active' },
+    { kind: 'runtime', name: 'auth:provider:openai-codex', state: 'ready' },
+  ]);
   const activeName = session.transcribers.getActiveName();
   if (!activeName || activeName === CODEX_TRANSCRIBER_NAME) return check;
 
@@ -173,7 +188,8 @@ export function formatVoiceReadinessNotice(check: RequirementCheck): string {
     return 'voice: run moxxy login openai-codex to enable Codex voice';
   }
   if (issue.requirement.kind === 'runtime' && issue.requirement.name === VOICE_CAPTURE_RUNTIME) {
-    return 'voice: ffmpeg is required for voice input';
+    const install = getInstallHint('ffmpeg');
+    return `voice: ffmpeg is required for voice input\nInstall via ${install.manager}:  ${install.command}`;
   }
   if (issue.requirement.kind === 'transcriber' && issue.code === 'inactive') {
     return `voice: Codex voice requires active transcriber ${CODEX_TRANSCRIBER_NAME}`;

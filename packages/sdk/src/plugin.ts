@@ -14,7 +14,6 @@ export type PluginKind = 'tools' | 'provider' | 'loop' | 'compactor' | 'mcp' | '
 export interface PluginSpec {
   readonly name: string;
   readonly version?: string;
-  readonly requirements?: ReadonlyArray<MoxxyRequirement>;
   readonly tools?: ReadonlyArray<ToolDef>;
   readonly providers?: ReadonlyArray<ProviderDef>;
   readonly loopStrategies?: ReadonlyArray<LoopStrategyDef>;
@@ -56,7 +55,6 @@ export interface Plugin extends PluginSpec {
 export interface PluginManifest {
   readonly entry: string;
   readonly kind?: PluginKind | ReadonlyArray<PluginKind>;
-  readonly requirements?: ReadonlyArray<MoxxyRequirement>;
   readonly skills?: string;
 }
 
@@ -64,4 +62,10 @@ export interface ResolvedPluginManifest extends PluginManifest {
   readonly packageName: string;
   readonly packageVersion: string;
   readonly packagePath: string;
+  /**
+   * Requirements declared at `package.json#moxxy.requirements`. Statically
+   * authored — never derived from code. Drives plugin toposort and the
+   * pre-load readiness gate.
+   */
+  readonly requirements?: ReadonlyArray<MoxxyRequirement>;
 }

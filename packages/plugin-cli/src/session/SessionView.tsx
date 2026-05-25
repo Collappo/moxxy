@@ -275,6 +275,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
         picker={picker}
         busy={turn.busy}
         voiceReady={voice.ready}
+        voicePhase={voice.phase}
         yolo={yolo}
         slashCommands={slashSuggestions}
         queueMessages={turn.queueRef.current}

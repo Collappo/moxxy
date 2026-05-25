@@ -32,10 +32,6 @@ function makeSession(): Session {
         }),
         defineTranscriber({
           name: 'openai-codex-transcribe',
-          requirements: [
-            { kind: 'provider', name: 'openai-codex', state: 'active' },
-            { kind: 'runtime', name: 'auth:provider:openai-codex', state: 'ready' },
-          ],
           createClient: () => ({ name: 'openai-codex-transcribe', transcribe: async () => ({ text: 'codex' }) }),
         }),
       ],
@@ -96,7 +92,12 @@ describe('Codex voice input readiness', () => {
     });
 
     expect(check.ready).toBe(false);
-    expect(formatVoiceReadinessNotice(check)).toBe('voice: ffmpeg is required for voice input');
+    const notice = formatVoiceReadinessNotice(check);
+    expect(notice).toContain('voice: ffmpeg is required for voice input');
+    // Second line is the platform-specific install command — exact text
+    // depends on the host running the test, so just assert structure.
+    expect(notice.split('\n')).toHaveLength(2);
+    expect(notice).toMatch(/Install via .+:\s+/);
   });
 
   it('does not overwrite another active transcriber', () => {

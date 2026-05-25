@@ -176,7 +176,7 @@ target's own nested requirements.
 
 The Codex voice path uses requirements as a production example:
 
-- `@moxxy/plugin-stt-openai-codex` requires the Codex provider plugin to be
+- `@moxxy/plugin-stt-whisper-codex` requires the Codex provider plugin to be
   registered.
 - `openai-codex-transcribe` requires active provider `openai-codex`.
 - It also requires runtime fact `auth:provider:openai-codex` to be `ready`.

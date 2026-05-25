@@ -49,21 +49,6 @@ export interface RequirementRegistryOptions {
   };
 }
 
-export function assertRequirementsReady(
-  owner: string,
-  requirements: ReadonlyArray<MoxxyRequirement> | undefined,
-  checker: RequirementChecker | undefined,
-): void {
-  if (!requirements || requirements.length === 0) return;
-  if (!checker) {
-    throw new Error(`No requirement checker configured for ${owner}`);
-  }
-  const check = checker.check(requirements);
-  if (!check.ready) {
-    throw new Error(formatRequirementIssues(check));
-  }
-}
-
 export function formatRequirementIssues(check: RequirementCheck): string {
   return check.issues
     .filter((issue) => !issue.requirement.optional)
@@ -81,7 +66,6 @@ interface TargetInfo {
   readonly name: string;
   readonly version?: string;
   readonly active: boolean;
-  readonly requirements?: ReadonlyArray<MoxxyRequirement>;
 }
 
 export class RequirementRegistry {
@@ -116,10 +100,13 @@ export class RequirementRegistry {
     return { ready: blocking.length === 0, issues };
   }
 
+  /**
+   * Convenience: check whether a single named target is present and (if
+   * its kind has an active/inactive distinction) currently active.
+   * Equivalent to `check([{ kind, name, state: 'active' }])`.
+   */
   isReady(kind: RequirementKind, name: string): RequirementCheck {
-    const target = this.targetInfo(kind, name);
-    if (!target) return this.check([{ kind, name }]);
-    return this.check([{ kind, name }, ...(target.requirements ?? [])]);
+    return this.check([{ kind, name, state: 'active' }]);
   }
 
   private checkOne(requirement: MoxxyRequirement): RequirementIssue | null {
@@ -164,50 +151,38 @@ export class RequirementRegistry {
       case 'provider': {
         const def = this.opts.providers.list().find((p) => p.name === name);
         return def
-          ? {
-              kind,
-              name,
-              version: versionOf(def),
-              active: this.opts.providers.getActiveName() === name,
-              requirements: def.requirements,
-            }
+          ? { kind, name, active: this.opts.providers.getActiveName() === name }
           : null;
       }
       case 'tool': {
         const def = this.opts.tools.get(name);
-        return def ? { kind, name, version: versionOf(def), active: true, requirements: def.requirements } : null;
+        return def ? { kind, name, active: true } : null;
       }
       case 'transcriber': {
         const def = this.opts.transcribers.list().find((t) => t.name === name);
         return def
-          ? {
-              kind,
-              name,
-              version: versionOf(def),
-              active: this.opts.transcribers.getActiveName() === name,
-              requirements: def.requirements,
-            }
+          ? { kind, name, active: this.opts.transcribers.getActiveName() === name }
           : null;
       }
       case 'loop': {
         const def = this.opts.loops.list().find((l) => l.name === name);
-        return def ? { kind, name, version: versionOf(def), active: activeLoopName(this.opts.loops) === name, requirements: def.requirements } : null;
+        return def ? { kind, name, active: activeLoopName(this.opts.loops) === name } : null;
       }
       case 'compactor': {
         const def = this.opts.compactors.list().find((c) => c.name === name);
-        return def ? { kind, name, version: versionOf(def), active: this.opts.compactors.getActive()?.name === name, requirements: def.requirements } : null;
+        return def ? { kind, name, active: this.opts.compactors.getActive()?.name === name } : null;
       }
       case 'channel': {
         const def = this.opts.channels.get(name);
-        return def ? { kind, name, version: versionOf(def), active: true, requirements: def.requirements } : null;
+        return def ? { kind, name, active: true } : null;
       }
       case 'agent': {
         const def = this.opts.agents.get(name);
-        return def ? { kind, name, version: versionOf(def), active: true, requirements: def.requirements } : null;
+        return def ? { kind, name, active: true } : null;
       }
       case 'command': {
         const def = this.opts.commands.get(name);
-        return def ? { kind, name, version: versionOf(def), active: true, requirements: def.requirements } : null;
+        return def ? { kind, name, active: true } : null;
       }
       case 'runtime':
         return null;
@@ -230,10 +205,6 @@ function issue(
 
 function label(kind: RequirementKind): string {
   return kind;
-}
-
-function versionOf(def: object): string | undefined {
-  return (def as { readonly version?: string }).version;
 }
 
 function activeLoopName(loops: RequirementRegistryOptions['loops']): string | null {

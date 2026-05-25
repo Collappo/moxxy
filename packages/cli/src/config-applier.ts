@@ -1,10 +1,17 @@
-import { PluginRequirementError, type Session } from '@moxxy/core';
-import type { Plugin } from '@moxxy/sdk';
+import { PluginRequirementError, readPackageMoxxyRequirements, type Session } from '@moxxy/core';
+import type { MoxxyRequirement, Plugin } from '@moxxy/sdk';
 import type { ConfigApplier, ConfigApplyResult, MoxxyConfig } from '@moxxy/config';
 
 export interface BuiltinPluginEntry {
   readonly name: string;
   readonly plugin: Plugin;
+}
+
+interface BuiltinPluginRecord {
+  readonly plugin: Plugin;
+  /** Resolved lazily on first toggle from `<name>/package.json#moxxy.requirements`. */
+  requirements?: ReadonlyArray<MoxxyRequirement>;
+  requirementsLoaded: boolean;
 }
 
 /**
@@ -31,7 +38,9 @@ export function buildSessionConfigApplier(
   builtins: ReadonlyArray<BuiltinPluginEntry> = [],
 ): ConfigApplier {
   let last: MoxxyConfig = initial;
-  const builtinsByName = new Map(builtins.map((b) => [b.name, b.plugin] as const));
+  const builtinsByName = new Map<string, BuiltinPluginRecord>(
+    builtins.map((b) => [b.name, { plugin: b.plugin, requirementsLoaded: false }] as const),
+  );
 
   return async (next): Promise<ConfigApplyResult> => {
     const applied: string[] = [];
@@ -105,7 +114,7 @@ interface PluginToggleResult {
  */
 async function applyPluginToggles(
   session: Session,
-  builtinsByName: Map<string, Plugin>,
+  builtinsByName: Map<string, BuiltinPluginRecord>,
   last: MoxxyConfig,
   next: MoxxyConfig,
 ): Promise<PluginToggleResult> {
@@ -126,11 +135,16 @@ async function applyPluginToggles(
 
     if (nowEnabled) {
       // Re-register
-      const plugin = builtinsByName.get(name);
-      if (!plugin) continue; // can't re-register a plugin we don't have a handle for
+      const record = builtinsByName.get(name);
+      if (!record) continue; // can't re-register a plugin we don't have a handle for
       if (loaded.has(name)) continue; // already registered
+      if (!record.requirementsLoaded) {
+        const reqs = await readPackageMoxxyRequirements(name, session.cwd);
+        if (reqs.length > 0) record.requirements = reqs;
+        record.requirementsLoaded = true;
+      }
       try {
-        session.pluginHost.registerStatic(plugin);
+        session.pluginHost.registerStatic(record.plugin, record.requirements ? { requirements: record.requirements } : {});
         applied.push({ name, enabled: true });
       } catch (err) {
         if (err instanceof PluginRequirementError) {

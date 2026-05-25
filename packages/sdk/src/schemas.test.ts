@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { pluginManifestSchema, skillFrontmatterSchema } from './schemas.js';
+import { moxxyPackageSchema, pluginManifestSchema, skillFrontmatterSchema } from './schemas.js';
 
 describe('skillFrontmatterSchema', () => {
   it('accepts minimal valid frontmatter', () => {
@@ -66,10 +66,15 @@ describe('pluginManifestSchema', () => {
     ]);
   });
 
-  it('accepts plugin requirements in package manifests', () => {
-    const parsed = pluginManifestSchema.parse({
-      entry: './dist/index.js',
-      kind: 'transcriber',
+  it('rejects unknown kind', () => {
+    expect(() => pluginManifestSchema.parse({ entry: 'a', kind: 'weird' })).toThrow();
+  });
+});
+
+describe('moxxyPackageSchema', () => {
+  it('accepts the full moxxy package block with plugin + requirements', () => {
+    const parsed = moxxyPackageSchema.parse({
+      plugin: { entry: './dist/index.js', kind: 'transcriber' },
       requirements: [
         {
           kind: 'plugin',
@@ -80,6 +85,7 @@ describe('pluginManifestSchema', () => {
       ],
     });
 
+    expect(parsed.plugin?.entry).toBe('./dist/index.js');
     expect(parsed.requirements).toEqual([
       {
         kind: 'plugin',
@@ -90,7 +96,11 @@ describe('pluginManifestSchema', () => {
     ]);
   });
 
-  it('rejects unknown kind', () => {
-    expect(() => pluginManifestSchema.parse({ entry: 'a', kind: 'weird' })).toThrow();
+  it('accepts a moxxy block with only requirements (no plugin entry)', () => {
+    const parsed = moxxyPackageSchema.parse({
+      requirements: [{ kind: 'plugin', name: 'base' }],
+    });
+    expect(parsed.plugin).toBeUndefined();
+    expect(parsed.requirements).toHaveLength(1);
   });
 });

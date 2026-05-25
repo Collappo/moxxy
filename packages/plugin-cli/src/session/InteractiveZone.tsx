@@ -10,6 +10,7 @@ import type { SlashCommand } from '../components/SlashCommands.js';
 import type { ExternalInsert } from '../components/prompt/external-insert.js';
 import type { QueuedMessage } from './use-turn-runner.js';
 import type { PendingApproval, PendingPermission, Picker } from './types.js';
+import type { VoicePhase } from './use-voice-input.js';
 
 interface InteractiveZoneProps {
   session: Session;
@@ -19,6 +20,7 @@ interface InteractiveZoneProps {
   picker: Picker;
   busy: boolean;
   voiceReady: boolean;
+  voicePhase: VoicePhase;
   yolo: boolean;
   slashCommands: ReadonlyArray<SlashCommand>;
   /** Live queue contents for the always-visible QueueView. */
@@ -52,6 +54,7 @@ export const InteractiveZone: React.FC<InteractiveZoneProps> = ({
   picker,
   busy,
   voiceReady,
+  voicePhase,
   yolo,
   slashCommands,
   queueMessages,
@@ -104,6 +107,7 @@ export const InteractiveZone: React.FC<InteractiveZoneProps> = ({
         onSubmit={onSubmit}
         disabled={false}
         yolo={yolo}
+        voicePhase={voicePhase}
         slashCommands={slashCommands}
         placeholder={buildPromptPlaceholder(busy, voiceReady)}
         onPasteText={onPasteText}

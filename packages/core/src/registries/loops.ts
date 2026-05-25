@@ -1,14 +1,8 @@
 import type { LoopStrategyDef } from '@moxxy/sdk';
-import { assertRequirementsReady, type RequirementChecker } from '../requirements.js';
 
 export class LoopRegistry {
   private readonly strategies = new Map<string, LoopStrategyDef>();
   private active: string | null = null;
-  private requirementChecker?: RequirementChecker;
-
-  setRequirementChecker(checker: RequirementChecker): void {
-    this.requirementChecker = checker;
-  }
 
   /**
    * Register a strategy. Throws on duplicate — use `replace()` for
@@ -56,7 +50,6 @@ export class LoopRegistry {
   }
 
   private activate(strategy: LoopStrategyDef): void {
-    assertRequirementsReady(`loop: ${strategy.name}`, strategy.requirements, this.requirementChecker);
     this.active = strategy.name;
   }
 }

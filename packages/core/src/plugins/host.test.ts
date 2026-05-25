@@ -40,7 +40,6 @@ const makeHost = () => {
     commands,
     transcribers,
   });
-  transcribers.setRequirementChecker(requirements);
   const dispatcher = new HookDispatcherImpl({ logger: silentLogger });
   const host = new PluginHost({
     cwd: '/tmp',
@@ -106,7 +105,6 @@ describe('PluginHost', () => {
     const { host, tools } = makeHost();
     const plugin = definePlugin({
       name: 'needs-codex',
-      requirements: [{ kind: 'plugin', name: '@moxxy/plugin-provider-openai-codex' }],
       tools: [
         defineTool({
           name: 'should-not-register',
@@ -117,9 +115,11 @@ describe('PluginHost', () => {
       ],
     });
 
-    expect(() => host.registerStatic(plugin)).toThrow(
-      /Required plugin is not registered: @moxxy\/plugin-provider-openai-codex/,
-    );
+    expect(() =>
+      host.registerStatic(plugin, {
+        requirements: [{ kind: 'plugin', name: '@moxxy/plugin-provider-openai-codex' }],
+      }),
+    ).toThrow(/Required plugin is not registered: @moxxy\/plugin-provider-openai-codex/);
     expect(tools.has('should-not-register')).toBe(false);
     expect(host.list()).toEqual([]);
     expect(host.listSkipped()).toMatchObject([
@@ -137,14 +137,6 @@ describe('PluginHost', () => {
     host.registerStatic(
       definePlugin({
         name: 'optional-codex',
-        requirements: [
-          {
-            kind: 'plugin',
-            name: '@moxxy/plugin-provider-openai-codex',
-            optional: true,
-            hint: 'Enable Codex for richer behavior.',
-          },
-        ],
         tools: [
           defineTool({
             name: 'optional-tool',
@@ -154,6 +146,16 @@ describe('PluginHost', () => {
           }),
         ],
       }),
+      {
+        requirements: [
+          {
+            kind: 'plugin',
+            name: '@moxxy/plugin-provider-openai-codex',
+            optional: true,
+            hint: 'Enable Codex for richer behavior.',
+          },
+        ],
+      },
     );
 
     expect(tools.has('optional-tool')).toBe(true);
@@ -162,26 +164,23 @@ describe('PluginHost', () => {
 
   it('clears a previous skip once the same plugin registers successfully', () => {
     const { host } = makeHost();
-    const plugin = definePlugin({
-      name: 'needs-codex',
-      requirements: [{ kind: 'plugin', name: '@moxxy/plugin-provider-openai-codex' }],
-    });
+    const plugin = definePlugin({ name: 'needs-codex' });
+    const opts = {
+      requirements: [{ kind: 'plugin' as const, name: '@moxxy/plugin-provider-openai-codex' }],
+    };
 
-    expect(() => host.registerStatic(plugin)).toThrow(/Required plugin is not registered/);
+    expect(() => host.registerStatic(plugin, opts)).toThrow(/Required plugin is not registered/);
     expect(host.listSkipped()).toHaveLength(1);
 
     host.registerStatic(definePlugin({ name: '@moxxy/plugin-provider-openai-codex' }));
-    host.registerStatic(plugin);
+    host.registerStatic(plugin, opts);
 
     expect(host.listSkipped()).toEqual([]);
   });
 
   it('records discovered plugin skips with discovered source metadata', () => {
     const { host } = makeHost();
-    const plugin = definePlugin({
-      name: '@demo/discovered',
-      requirements: [{ kind: 'plugin', name: '@demo/base' }],
-    });
+    const plugin = definePlugin({ name: '@demo/discovered' });
 
     expect(() =>
       host.registerDiscovered(plugin, {
@@ -189,6 +188,7 @@ describe('PluginHost', () => {
         packageName: '@demo/discovered',
         packageVersion: '1.0.0',
         packagePath: '/tmp/discovered',
+        requirements: [{ kind: 'plugin', name: '@demo/base' }],
       }),
     ).toThrow(/Required plugin is not registered/);
 
@@ -207,7 +207,6 @@ describe('PluginHost', () => {
     host.registerStatic(
       definePlugin({
         name: 'needs-codex',
-        requirements: [{ kind: 'plugin', name: '@moxxy/plugin-provider-openai-codex' }],
         tools: [
           defineTool({
             name: 'registers-after-requirements',
@@ -217,6 +216,9 @@ describe('PluginHost', () => {
           }),
         ],
       }),
+      {
+        requirements: [{ kind: 'plugin', name: '@moxxy/plugin-provider-openai-codex' }],
+      },
     );
 
     expect(tools.has('registers-after-requirements')).toBe(true);

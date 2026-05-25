@@ -258,9 +258,12 @@ importers:
       '@moxxy/plugin-security':
         specifier: workspace:*
         version: link:../plugin-security
-      '@moxxy/plugin-stt-openai-codex':
+      '@moxxy/plugin-stt-whisper':
         specifier: workspace:*
-        version: link:../plugin-stt-openai-codex
+        version: link:../plugin-stt-whisper
+      '@moxxy/plugin-stt-whisper-codex':
+        specifier: workspace:*
+        version: link:../plugin-stt-whisper-codex
       '@moxxy/plugin-subagents':
         specifier: workspace:*
         version: link:../plugin-subagents
@@ -1011,18 +1014,15 @@ importers:
         specifier: ^2.1.8
         version: 2.1.9(@types/node@22.19.18)
 
-  packages/plugin-stt-openai-codex:
+  packages/plugin-stt-whisper:
     dependencies:
-      '@moxxy/plugin-provider-openai-codex':
-        specifier: workspace:*
-        version: link:../plugin-provider-openai-codex
       '@moxxy/sdk':
         specifier: workspace:*
         version: link:../sdk
+      openai:
+        specifier: ^4.80.0
+        version: 4.104.0(ws@8.20.0)(zod@3.25.76)
     devDependencies:
-      '@moxxy/plugin-vault':
-        specifier: workspace:*
-        version: link:../plugin-vault
       '@moxxy/tsconfig':
         specifier: workspace:*
         version: link:../../tooling/tsconfig
@@ -1039,15 +1039,21 @@ importers:
         specifier: ^2.1.8
         version: 2.1.9(@types/node@22.19.18)
 
-  packages/plugin-stt-whisper:
+  packages/plugin-stt-whisper-codex:
     dependencies:
+      '@moxxy/plugin-provider-openai-codex':
+        specifier: workspace:*
+        version: link:../plugin-provider-openai-codex
+      '@moxxy/plugin-stt-whisper':
+        specifier: workspace:*
+        version: link:../plugin-stt-whisper
       '@moxxy/sdk':
         specifier: workspace:*
         version: link:../sdk
-      openai:
-        specifier: ^4.80.0
-        version: 4.104.0(ws@8.20.0)(zod@3.25.76)
     devDependencies:
+      '@moxxy/plugin-vault':
+        specifier: workspace:*
+        version: link:../plugin-vault
       '@moxxy/tsconfig':
         specifier: workspace:*
         version: link:../../tooling/tsconfig
@@ -6610,6 +6616,14 @@ snapshots:
     optionalDependencies:
       vite: 5.4.21(@types/node@22.19.18)
 
+  '@vitest/mocker@2.1.9(vite@5.4.21(@types/node@24.12.3))':
+    dependencies:
+      '@vitest/spy': 2.1.9
+      estree-walker: 3.0.3
+      magic-string: 0.30.21
+    optionalDependencies:
+      vite: 5.4.21(@types/node@24.12.3)
+
   '@vitest/pretty-format@2.1.9':
     dependencies:
       tinyrainbow: 1.2.0
@@ -9928,7 +9942,7 @@ snapshots:
   vitest@2.1.9(@types/node@24.12.3):
     dependencies:
       '@vitest/expect': 2.1.9
-      '@vitest/mocker': 2.1.9(vite@5.4.21(@types/node@22.19.18))
+      '@vitest/mocker': 2.1.9(vite@5.4.21(@types/node@24.12.3))
       '@vitest/pretty-format': 2.1.9
       '@vitest/runner': 2.1.9
       '@vitest/snapshot': 2.1.9

@@ -71,9 +71,24 @@ export const pluginManifestSchema = z.object({
   kind: z
     .union([pluginKindSchema, z.array(pluginKindSchema)])
     .optional(),
-  requirements: z.array(requirementSchema).optional(),
   skills: z.string().optional(),
+});
+
+/**
+ * Shape of a package's `moxxy` field in package.json.
+ *
+ * - `plugin` — the per-package plugin manifest (`entry`, `kind`, `skills`).
+ *   When omitted the package is not treated as a moxxy plugin.
+ * - `requirements` — declarative prerequisites that gate plugin
+ *   registration and drive load-order toposort. This is the SINGLE place
+ *   requirements may be authored; per-tool/per-transcriber/per-anything
+ *   runtime declarations were removed in favor of static analysis.
+ */
+export const moxxyPackageSchema = z.object({
+  plugin: pluginManifestSchema.optional(),
+  requirements: z.array(requirementSchema).optional(),
 });
 
 export type SkillFrontmatterInput = z.infer<typeof skillFrontmatterSchema>;
 export type PluginManifestInput = z.infer<typeof pluginManifestSchema>;
+export type MoxxyPackageInput = z.infer<typeof moxxyPackageSchema>;

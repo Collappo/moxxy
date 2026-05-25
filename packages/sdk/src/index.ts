@@ -207,9 +207,17 @@ export {
 export {
   skillFrontmatterSchema,
   pluginManifestSchema,
+  moxxyPackageSchema,
   requirementSchema,
   type SkillFrontmatterInput,
   type PluginManifestInput,
+  type MoxxyPackageInput,
 } from './schemas.js';
+
+export {
+  getInstallHint,
+  type InstallHint,
+  type InstallTarget,
+} from './install-hints.js';
 
 export { z } from 'zod';

@@ -96,17 +96,4 @@ describe('auto-consolidation nudge hook', () => {
     expect(result).toBeUndefined();
   });
 
-  it('declares the memory plugin as a hard requirement', () => {
-    const store = new MemoryStore({ dir: tmp, embedder: null });
-    const plugin = buildMemoryConsolidatePlugin(store, () => stubProvider);
-
-    expect(plugin.requirements).toEqual([
-      {
-        kind: 'plugin',
-        name: '@moxxy/plugin-memory',
-        state: 'registered',
-        hint: 'Enable @moxxy/plugin-memory.',
-      },
-    ]);
-  });
 });

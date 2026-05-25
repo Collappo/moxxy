@@ -23,15 +23,6 @@ function makeSession(): Session {
       transcribers: [
         defineTranscriber({
           name: 'openai-codex-transcribe',
-          requirements: [
-            { kind: 'provider', name: 'openai-codex', state: 'active' },
-            {
-              kind: 'runtime',
-              name: 'auth:provider:openai-codex',
-              state: 'ready',
-              hint: 'Run `moxxy login openai-codex`.',
-            },
-          ],
           createClient: () => ({ name: 'openai-codex-transcribe', transcribe: async () => ({ text: 'ok' }) }),
         }),
       ],

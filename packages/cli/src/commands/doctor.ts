@@ -213,7 +213,11 @@ export function buildVoiceDoctorCheck(
   captureReadiness: RequirementCheck = { ready: true, issues: [] },
 ): Check {
   const readiness = combineRequirementChecks(
-    session.requirements.isReady('transcriber', CODEX_TRANSCRIBER_NAME),
+    session.requirements.check([
+      { kind: 'transcriber', name: CODEX_TRANSCRIBER_NAME },
+      { kind: 'provider', name: 'openai-codex', state: 'active' },
+      { kind: 'runtime', name: 'auth:provider:openai-codex', state: 'ready' },
+    ]),
     captureReadiness,
   );
   const activeProvider = session.providers.getActiveName() ?? '(none)';

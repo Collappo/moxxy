@@ -100,11 +100,6 @@ export class Session {
       commands: this.commands,
       transcribers: this.transcribers,
     });
-    this.tools.setRequirementChecker(this.requirements);
-    this.providers.setRequirementChecker(this.requirements);
-    this.loops.setRequirementChecker(this.requirements);
-    this.compactors.setRequirementChecker(this.requirements);
-    this.transcribers.setRequirementChecker(this.requirements);
     this.permissions = opts.permissionEngine ?? new PermissionEngine();
     // Always wrap the user-supplied resolver with the persistent
     // policy engine, so saved `allow_always` / `deny` rules from
