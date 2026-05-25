@@ -80,7 +80,7 @@ function classifyVoiceNotice(notice: string): VoiceNoticeStyle | null {
   return { label: ' VOICE ', accent: Colors.danger, textColor: 'black', body };
 }
 
-const SystemNotice: React.FC<{ notice: string }> = ({ notice }) => {
+export const SystemNotice: React.FC<{ notice: string }> = ({ notice }) => {
   const voice = classifyVoiceNotice(notice);
   if (voice) {
     const lines = voice.body.split('\n');
