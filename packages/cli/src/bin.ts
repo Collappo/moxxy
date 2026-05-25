@@ -104,36 +104,65 @@ const SECTIONS: ReadonlyArray<{ readonly title: string; readonly rows: ReadonlyA
   },
 ];
 
-function renderHelp(): string {
-  // Pad every command column to the widest entry across all sections so
-  // commands and descriptions line up consistently down the page —
-  // mirrors the columnar layout `moxxy channels` uses for the
-  // name+status pair.
-  const colWidth = Math.max(
-    ...SECTIONS.flatMap((s) => s.rows.map(([cmd]) => cmd.length)),
-  );
+// Indent of the command column under each rule; the rule label sits two
+// spaces shallower so the divider's `──` brackets the group title.
+const ROW_INDENT = 4;
+const RULE_INDENT = 2;
 
+function renderHelp(): string {
+  const width = process.stdout.columns ?? 80;
+
+  // Center the slogan + version "crown" to the terminal, matching the
+  // bootscreen. Pad off the VISIBLE length (raw strings) — the ANSI codes
+  // colors.* add are zero-width and would otherwise skew the math.
   const version = cliVersion();
+  const slogan = pickSlogan();
+  const tail = version ? `  ·  v${version}` : '';
+  const headerVisible = slogan.length + tail.length;
+  const headerPad = ' '.repeat(Math.max(0, Math.floor((width - headerVisible) / 2)));
   const header =
-    colors.dim(colors.italic(pickSlogan())) +
-    (version ? colors.dim(`  ·  v${version}`) : '');
+    headerPad + colors.dim(colors.italic(slogan)) + (tail ? colors.dim(tail) : '');
+
+  // Width of the widest rendered "    cmd  desc" row across every section —
+  // the dividers extend to this so they all line up, capped to the terminal.
+  const rowWidth = Math.max(
+    ...SECTIONS.map((s) => {
+      const colWidth = Math.max(...s.rows.map(([cmd]) => cmd.length));
+      return Math.max(...s.rows.map(([, desc]) => ROW_INDENT + colWidth + 2 + desc.length));
+    }),
+  );
+  const ruleWidth = Math.min(rowWidth, width - RULE_INDENT);
+
+  // A dim-gray hairline rule introducing a group: `  ── label ─────…`.
+  const rule = (label: string): string => {
+    const lead = `── ${label} `;
+    const fill = '─'.repeat(Math.max(0, ruleWidth - RULE_INDENT - lead.length));
+    return ' '.repeat(RULE_INDENT) + colors.dim(colors.gray(lead + fill));
+  };
 
   const out: string[] = [];
   out.push(header);
   out.push('');
 
   SECTIONS.forEach((section, i) => {
-    out.push(colors.bold(section.title));
+    // Per-section column width so short commands (moxxy, init, tui) sit
+    // tight against their descriptions instead of floating off a global max.
+    const colWidth = Math.max(...section.rows.map(([cmd]) => cmd.length));
+    out.push(rule(section.title.toLowerCase()));
     for (const [cmd, desc] of section.rows) {
       const padded = cmd.padEnd(colWidth, ' ');
-      out.push(`  ${colors.bold(padded)}  ${colors.dim(desc)}`);
+      out.push(`${' '.repeat(ROW_INDENT)}${colors.bold(padded)}  ${colors.dim(desc)}`);
     }
     if (i < SECTIONS.length - 1) out.push('');
   });
 
   out.push('');
-  out.push(`  ${colors.bold('Keys'.padEnd(colWidth))}  ${colors.dim('vault → env var → interactive prompt (TTY only;')}`);
-  out.push(`  ${' '.repeat(colWidth)}  ${colors.dim('prompted values are saved back to the vault).')}`);
+  out.push(
+    `${' '.repeat(RULE_INDENT)}${colors.dim('Keys resolve vault → env var → interactive prompt (TTY only;')}`,
+  );
+  out.push(
+    `${' '.repeat(RULE_INDENT)}${colors.dim('prompted values are saved back to the vault).')}`,
+  );
   out.push('');
   out.push(`${colors.dim('Run')} ${colors.bold('moxxy init')} ${colors.dim('to get started.')}`);
   out.push(`${colors.dim('See')} ${colors.bold('moxxy <command> --help')} ${colors.dim('for per-command details.')}`);
@@ -146,12 +175,17 @@ function renderHelp(): string {
 // set that can drift out of sync.
 const COMMANDS: Record<string, CommandHandler> = {
   help: async () => {
-    process.stdout.write(renderLogo() + renderHelp());
+    process.stdout.write(renderLogo(undefined, { center: true, twoTone: true }) + renderHelp());
     return 0;
   },
   version: async () => {
     const v = cliVersion() ?? '0.0.0';
-    process.stdout.write(renderLogo() + `moxxy ${v}\n`);
+    const width = process.stdout.columns ?? 80;
+    const line = `moxxy ${v}`;
+    const pad = ' '.repeat(Math.max(0, Math.floor((width - line.length) / 2)));
+    process.stdout.write(
+      renderLogo(undefined, { center: true, twoTone: true }) + pad + line + '\n',
+    );
     return 0;
   },
   init: runInitCommand,
