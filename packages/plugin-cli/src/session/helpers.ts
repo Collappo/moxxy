@@ -35,6 +35,7 @@ export function buildSlashSuggestions(session: Session): ReadonlyArray<SlashComm
     .map((c: CommandDef) => ({
       name: c.name,
       description: c.description,
+      ...(c.argumentHint ? { argumentHint: c.argumentHint } : {}),
       ...(c.aliases ? { aliases: c.aliases } : {}),
     }));
   const seen = new Set(fromRegistry.map((c) => c.name));

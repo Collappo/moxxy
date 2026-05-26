@@ -90,16 +90,29 @@ const exitCmd: CommandDef = {
 const helpCmd: CommandDef = {
   name: 'help',
   description: 'List every command available in this channel',
-  handler: ({ session, channel }) => {
+  argumentHint: '[command]',
+  handler: ({ session, channel, args }) => {
     const s = session as SessionShape;
     const visible = s.commands
       .list()
       .filter((c) => !c.channels || c.channels.includes(channel))
       .sort((a, b) => a.name.localeCompare(b.name));
     if (visible.length === 0) return { kind: 'text', text: '(no commands registered)' };
+    // `/help <command>` — show one command's detail (description + usage).
+    const query = args.trim().replace(/^\//, '').toLowerCase();
+    if (query) {
+      const match = visible.find(
+        (c) => c.name === query || c.aliases?.includes(query),
+      );
+      if (!match) return { kind: 'text', text: `no command named "/${query}" (try /help)` };
+      const lines = [`/${match.name}  —  ${match.description}`];
+      if (match.argumentHint) lines.push(`usage: /${match.name} ${match.argumentHint}`);
+      if (match.aliases?.length) lines.push(`aliases: ${match.aliases.map((a) => `/${a}`).join(', ')}`);
+      return { kind: 'text', text: lines.join('\n') };
+    }
     const longest = visible.reduce((m, c) => Math.max(m, c.name.length), 0);
     const lines = visible.map(
-      (c) => `/${c.name.padEnd(longest)}  ${c.description}`,
+      (c) => `/${c.name.padEnd(longest)}  ${c.description}${c.argumentHint ? ` ${c.argumentHint}` : ''}`,
     );
     return { kind: 'text', text: lines.join('\n') };
   },

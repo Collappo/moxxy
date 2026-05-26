@@ -9,6 +9,8 @@ import { Box, Text } from 'ink';
 export interface SlashCommand {
   readonly name: string;          // without leading `/`
   readonly description: string;
+  /** Usage hint for args, e.g. `set <key> <value>` — shown as ghost text. */
+  readonly argumentHint?: string;
   readonly aliases?: ReadonlyArray<string>;
 }
 
@@ -27,7 +29,12 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<SlashCommand> = [
   { name: 'skills', description: 'List the discovered skills' },
   { name: 'agents', description: 'Inspect spawned subagents and their activity' },
   { name: 'model', description: 'Switch provider + model — opens a picker' },
-  { name: 'mode', description: 'Switch mode (tool-use / plan-execute / bmad)', aliases: ['loop'] },
+  {
+    name: 'mode',
+    description: 'Switch mode (tool-use / plan-execute / bmad)',
+    argumentHint: '[mode]',
+    aliases: ['loop'],
+  },
   { name: 'mcp', description: 'Enable / disable / remove MCP servers' },
   {
     name: 'yolo',

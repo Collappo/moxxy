@@ -107,6 +107,22 @@ export const PromptInput: React.FC<PromptInputProps> = ({
   const slashCursorRef = useRef(slashCursor);
   slashCursorRef.current = slashCursor;
 
+  // Dimmed autocomplete preview shown inline after the cursor: the rest
+  // of the focused command's name plus its argument hint. Only while the
+  // user is still typing the NAME (no whitespace yet), the cursor sits at
+  // the buffer end, and the focused match's name actually extends what was
+  // typed (skip alias-only matches, where a completion would read wrong).
+  const ghostSuffix = ((): string => {
+    if (!slashEligible || state.cursor !== state.buffer.length) return '';
+    const needle = state.buffer.slice(1);
+    if (needle === '' || /\s/.test(needle)) return '';
+    const focused = slashMatches[Math.min(slashCursor, slashMatches.length - 1)];
+    if (!focused || !focused.name.toLowerCase().startsWith(needle.toLowerCase())) return '';
+    const restName = focused.name.slice(needle.length);
+    const hint = focused.argumentHint ? ` ${focused.argumentHint}` : '';
+    return restName + hint;
+  })();
+
   const handleSubmit = useCallback(() => {
     const cur = stateRef.current;
     const trimmed = cur.buffer.trim();
@@ -238,6 +254,7 @@ export const PromptInput: React.FC<PromptInputProps> = ({
         cursor={state.cursor}
         disabled={!!disabled}
         placeholder={placeholder}
+        ghostSuffix={ghostSuffix}
       />
     </Box>
   );

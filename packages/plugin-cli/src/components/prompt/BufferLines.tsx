@@ -6,7 +6,14 @@ export const BufferLines: React.FC<{
   cursor: number;
   disabled: boolean;
   placeholder?: string;
-}> = ({ buffer, cursor, disabled, placeholder }) => {
+  /**
+   * Dimmed autocomplete preview rendered immediately after the cursor
+   * when it sits at the very end of the buffer (e.g. the rest of a slash
+   * command name plus its argument hint). Purely visual — never part of
+   * `buffer`.
+   */
+  ghostSuffix?: string;
+}> = ({ buffer, cursor, disabled, placeholder, ghostSuffix }) => {
   const empty = buffer.length === 0;
   const lines = empty ? [''] : buffer.split('\n');
   const { lineIdx, colIdx } = locateCursor(buffer, cursor);
@@ -30,6 +37,11 @@ export const BufferLines: React.FC<{
         const before = isCursorLine ? line.slice(0, colIdx) : line;
         const after = isCursorLine ? line.slice(colIdx) : '';
         const showPlaceholder = i === lines.length - 1 && empty && !!placeholder;
+        // Ghost text follows the cursor, so only render it on the cursor
+        // line and only when the cursor is at the buffer's end (no `after`
+        // text to push it out of place).
+        const showGhost =
+          isCursorLine && cursor === buffer.length && after === '' && !!ghostSuffix;
         return (
           <Box key={i} flexDirection="row">
             <Box flexShrink={0}>
@@ -40,6 +52,7 @@ export const BufferLines: React.FC<{
                 {before}
                 {isCursorLine ? <Text color="green">▌</Text> : null}
                 {after}
+                {showGhost ? <Text dimColor>{ghostSuffix}</Text> : null}
                 {showPlaceholder ? <Text dimColor>{placeholder}</Text> : null}
               </Text>
             </Box>

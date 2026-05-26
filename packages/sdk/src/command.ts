@@ -19,6 +19,13 @@ export interface CommandDef {
   readonly name: string;
   /** One-line description shown in `/help` and channel pickers. */
   readonly description: string;
+  /**
+   * Usage hint for the arguments, e.g. `set <name> <value>`. Interactive
+   * channels may render it as dimmed ghost text after the command name
+   * while the user is typing (autocomplete preview). Placeholders like
+   * `<name>` are illustrative — never inserted into the buffer literally.
+   */
+  readonly argumentHint?: string;
   /** Alternative names (without leading `/`). */
   readonly aliases?: ReadonlyArray<string>;
   /**

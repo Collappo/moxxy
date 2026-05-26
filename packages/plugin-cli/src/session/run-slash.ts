@@ -1,4 +1,5 @@
 import type React from 'react';
+import { savePreferences } from '@moxxy/core';
 import type { ClientSession as Session } from '@moxxy/sdk';
 import type { UserPromptAttachment } from '@moxxy/sdk';
 import type { ListPickerOption } from '../components/ListPicker.js';
@@ -79,7 +80,7 @@ export function runSlash(cmd: string, deps: SlashDeps): void {
       return openMcpPicker(deps);
     case '/mode':
     case '/loop':
-      return openModePicker(deps);
+      return openModePicker(deps, args);
     case '/yolo':
     case '/auto-approve':
       deps.setYolo((y) => {
@@ -215,16 +216,38 @@ function openMcpPicker(deps: SlashDeps): void {
   })();
 }
 
-function openModePicker(deps: SlashDeps): void {
+function openModePicker(deps: SlashDeps, arg = ''): void {
   const modes = deps.session.modes.list();
+  if (modes.length === 0) {
+    deps.setSystemNotice('no modes registered');
+    return;
+  }
+  // `/mode <name>` switches directly when the argument names a mode;
+  // otherwise (no arg, or no match) fall back to the interactive picker.
+  const target = arg.trim().toLowerCase();
+  if (target) {
+    const match = modes.find((m) => m.name.toLowerCase() === target);
+    if (match) {
+      try {
+        deps.session.modes.setActive(match.name);
+        deps.setSystemNotice(`mode → ${match.name}`);
+        void savePreferences({ mode: match.name });
+      } catch (err) {
+        deps.setSystemNotice(
+          `failed to switch mode: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+      return;
+    }
+    deps.setSystemNotice(
+      `no mode named "${arg.trim()}". Available: ${modes.map((m) => m.name).join(', ')}`,
+    );
+    return;
+  }
   const options: ListPickerOption[] = modes.map((s) => ({
     id: s.name,
     label: s.name,
     current: s.name === deps.modeName,
   }));
-  if (options.length === 0) {
-    deps.setSystemNotice('no modes registered');
-    return;
-  }
   deps.setPicker({ kind: 'mode', title: 'Switch mode', options });
 }

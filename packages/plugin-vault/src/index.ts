@@ -49,6 +49,7 @@ export function buildVaultPlugin(opts: BuildVaultPluginOptions = {}): { plugin: 
   const vaultCmd: CommandDef = {
     name: 'vault',
     description: 'Store a secret or list stored names',
+    argumentHint: 'set <name> <value>',
     pendingNotice: 'updating vault',
     handler: async (ctx) => {
       const trimmed = ctx.args.trim();
