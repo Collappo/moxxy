@@ -421,6 +421,24 @@ function coreTools(deps: SelfUpdateDeps): ToolDef[] {
     handler: async (input, ctx: ToolContext) => {
       const install = resolveCoreInstall(deps);
       if (!install) throw new Error('could not resolve the installed @moxxy/core — cannot self-update core');
+
+      // Serialize core transactions: only ONE may be in flight at a time. Every
+      // txn shares the single provisioned workspace (repoDir), so a second
+      // concurrent txn would clobber the first's edits + build. Refuse rather
+      // than corrupt — the active txn must be finished (verify → commit) or
+      // released (self_update_core_rollback, which is a no-op overlay restore +
+      // marks it rolled_back even when nothing was applied yet).
+      const active = (await listCoreTxns(deps.moxxyDir)).find(
+        (j) => j.state !== 'committed' && j.state !== 'rolled_back',
+      );
+      if (active) {
+        throw new Error(
+          `a core update is already in progress (txn ${active.txnId}, state "${active.state}"). ` +
+            `Finish it (self_update_core_verify → self_update_commit) or release it with ` +
+            `self_update_core_rollback({ coreTxnId: "${active.txnId}" }) before starting another.`,
+        );
+      }
+
       const pf = await corePreflight(install);
       if (!pf.ok) {
         throw new Error(
