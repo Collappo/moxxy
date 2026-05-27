@@ -13,8 +13,11 @@ If you're a Claude Code agent or any other autonomous agent: read this file firs
 @moxxy/core    <— runtime (event log, plugin host, registries, permissions, session, skill loader)
 
 @moxxy/tools-builtin              Read/Edit/Write/Bash/Grep/Glob
-@moxxy/loop-tool-use              default loop strategy (Claude Code-style)
-@moxxy/loop-plan-execute          alt loop strategy
+@moxxy/mode-tool-use              default loop strategy (Claude Code-style)
+@moxxy/mode-plan-execute          plan-then-execute loop strategy
+@moxxy/mode-developer             implement → verify → commit loop strategy
+@moxxy/mode-bmad                  BMAD multi-persona loop strategy
+@moxxy/mode-deep-research         multi-query research + synthesis loop strategy
 @moxxy/compactor-summarize        default summarize-old-turns compactor
 @moxxy/cache-strategy-stable-prefix  default prompt-cache strategy (stable-prefix breakpoints; `none` = opt-out)
 @moxxy/skills-builtin             MD skills shipped with the framework
@@ -35,6 +38,18 @@ If you're a Claude Code agent or any other autonomous agent: read this file firs
 @moxxy/isolator-worker            worker_threads-based Isolator (memory + time + JS-state isolation)
 @moxxy/isolator-subprocess        subprocess Isolator (kernel-enforced process boundary)
 @moxxy/isolator-wasm              WebAssembly Isolator (zero ambient authority; experimental)
+@moxxy/plugin-provider-openai-codex  ChatGPT OAuth provider (Responses API)
+@moxxy/plugin-provider-admin      register OpenAI-compatible providers at runtime
+@moxxy/plugin-oauth               generic OAuth 2.0 + PKCE / device-code
+@moxxy/plugin-stt-whisper         Whisper transcriber (voice in); `-codex` variant reuses ChatGPT creds
+@moxxy/plugin-computer-control    macOS native input (screenshot/click/type)
+@moxxy/plugin-subagents           dispatch typed sub-agents from a turn
+@moxxy/plugin-commands            built-in slash commands (/info, /clear, /compact, …)
+@moxxy/plugin-self-update         agent edits its own plugins/skills (Tier 1) + core (Tier 2)
+@moxxy/plugin-plugins-admin       install / list / remove @moxxy plugins at runtime
+@moxxy/plugin-usage-stats         per-session token + cost accounting
+@moxxy/plugin-webhooks            external-event triggers (verified HTTP listener + tunnels)
+@moxxy/runner                     bare session runner; channels attach over a unix socket (JSON-RPC)
 
 @moxxy/config      defineConfig + loader (cosmiconfig-style discovery + zod validation)
 @moxxy/testing     FakeProvider + record/replay harness
@@ -67,7 +82,7 @@ When a user prompt matches no existing skill, the loop invokes `synthesize_skill
 ## The hard invariants (dep-cruiser enforced)
 
 1. **`@moxxy/sdk` has zero internal deps.** It's the typed public surface.
-2. **`@moxxy/core` never imports a plugin.** Static imports from core into `@moxxy/plugin-*`, `@moxxy/loop-plan-execute`, `@moxxy/compactor-*`, or `@moxxy/skills-builtin` are forbidden. Plugins are dynamically loaded — pulling them in statically inverts the dependency arrow.
+2. **`@moxxy/core` never imports a plugin.** Static imports from core into `@moxxy/plugin-*`, `@moxxy/mode-*`, `@moxxy/compactor-*`, `@moxxy/cache-strategy-*`, or `@moxxy/skills-builtin` are forbidden. Plugins are dynamically loaded — pulling them in statically inverts the dependency arrow.
 3. **Plugins CAN import from `@moxxy/core`** (and several do — channels need `Session`, `runTurn`, `createDeferredPermissionResolver`). The hard rule is the reverse direction.
 4. **No circular deps.** Re-route through `@moxxy/sdk`.
 

@@ -256,8 +256,13 @@ export default defineConfig({
 @moxxy/isolator-subprocess          ← subprocess Isolator (kernel-enforced process boundary)
 @moxxy/isolator-wasm                ← WebAssembly Isolator (zero ambient authority; experimental)
 @moxxy/plugin-subagents             ← spawn sub-agents from a turn
+@moxxy/plugin-commands              ← built-in slash commands (/info, /clear, /compact, …)
+@moxxy/plugin-self-update           ← agent edits its own plugins/skills (Tier 1) + core (Tier 2)
+@moxxy/plugin-plugins-admin         ← install / list / remove @moxxy plugins at runtime
+@moxxy/plugin-usage-stats           ← per-session token + cost accounting
 @moxxy/compactor-summarize          ← default context-window compactor
 @moxxy/cache-strategy-stable-prefix ← default prompt-cache strategy (deterministic breakpoints; `none` opts out)
+@moxxy/runner                       ← bare session runner; channels attach over a unix socket (JSON-RPC)
 @moxxy/cli                          ← the `moxxy` binary
 @moxxy/config                       ← defineConfig + moxxy.config.ts loader
 @moxxy/testing                      ← FakeProvider + record/replay harness
