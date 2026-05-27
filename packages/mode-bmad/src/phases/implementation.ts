@@ -1,6 +1,7 @@
 import {
   asToolCallId,
   collectProviderStream,
+  dispatchToolCall,
   runCompactionIfNeeded,
   runElisionIfNeeded,
   usageEventFields,
@@ -9,7 +10,6 @@ import {
 } from '@moxxy/sdk';
 
 import { BMAD_MODE_NAME, type Artifacts } from '../constants.js';
-import { dispatchToolCall } from '../tool-dispatch.js';
 import {
   buildBmadContext,
   buildDevNudge,

@@ -2,6 +2,7 @@ import {
   asToolCallId,
   buildSystemPromptWithSkills,
   collectProviderStream,
+  dispatchToolCall,
   projectMessages,
   runCompactionIfNeeded,
   runElisionIfNeeded,
@@ -10,7 +11,6 @@ import {
 } from '@moxxy/sdk';
 
 import { PLAN_EXECUTE_MODE_NAME, PLAN_PLUGIN_ID } from './constants.js';
-import { dispatchToolCall } from './tool-dispatch.js';
 
 /**
  * Execute one plan step as a small tool-use sub-loop. Returns `true` when
@@ -169,7 +169,10 @@ export async function executeStep(
         input: t.input,
       });
 
-      await dispatchToolCall(ctx, t, iteration);
+      // Drain the dispatch generator: its events reach the log via ctx.emit
+      // (run-turn surfaces from the log, not the mode's yields), so this phase
+      // doesn't need to re-yield them.
+      for await (const _ of dispatchToolCall(ctx, t, iteration)) void _;
     }
   }
   return false;

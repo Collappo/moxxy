@@ -2,6 +2,7 @@ import {
   asToolCallId,
   buildSystemPromptWithSkills,
   collectProviderStream,
+  dispatchToolCall,
   projectMessages,
   runCompactionIfNeeded,
   runElisionIfNeeded,
@@ -11,7 +12,6 @@ import {
 } from '@moxxy/sdk';
 
 import { DEVELOPER_MODE_NAME, VERIFY_MAX_ITERATIONS, VERIFY_SYSTEM_PROMPT } from './constants.js';
-import { dispatchToolCall } from './tool-dispatch.js';
 
 /**
  * Window + threshold for the verify-phase stuck-loop detector. Verify
@@ -157,7 +157,8 @@ export async function* runVerifyPhase(
         name: t.name,
         input: t.input,
       });
-      await dispatchToolCall(ctx, t, iteration);
+      // Drain the dispatch generator — its events reach the log via ctx.emit.
+      for await (const _ of dispatchToolCall(ctx, t, iteration)) void _;
     }
   }
 

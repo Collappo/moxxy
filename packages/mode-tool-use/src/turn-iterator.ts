@@ -2,6 +2,7 @@ import {
   asToolCallId,
   buildSystemPromptWithSkills,
   collectProviderStream,
+  dispatchToolCall,
   projectMessages,
   runCompactionIfNeeded,
   runElisionIfNeeded,
@@ -11,8 +12,6 @@ import {
   type MoxxyEvent,
   type ProjectedMessages,
 } from '@moxxy/sdk';
-
-import { dispatchToolCall } from './tool-dispatch.js';
 import { createStuckLoopDetector } from './stuck-loop-detector.js';
 
 export const TOOL_USE_MODE_NAME = 'tool-use';

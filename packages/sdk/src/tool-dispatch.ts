@@ -1,15 +1,22 @@
-import {
-  asToolCallId,
-  type CollectedToolUse,
-  type ModeContext,
-  type MoxxyEvent,
-  type ToolCallVerdict,
-} from '@moxxy/sdk';
+import { asToolCallId } from './ids.js';
+import type { MoxxyEvent } from './events.js';
+import type { ModeContext } from './mode.js';
+import type { ToolCallVerdict } from './hooks.js';
+import type { CollectedToolUse } from './mode-helpers.js';
 
 /**
- * Execute a single tool-use: dispatch hooks, run permission check, invoke
- * the tool, and emit the appropriate result events. The function is an
- * async generator so the caller can stream events directly into the loop.
+ * Execute a single tool-use end-to-end: dispatch `dispatchToolCall` hooks, run
+ * the permission check, invoke the tool, and emit the approved/denied/result
+ * events. An async generator so a loop strategy can `yield*` it; callers that
+ * don't need the events can drain it (`for await (const _ of …) {}`) — either
+ * way the events reach the log via `ctx.emit`.
+ *
+ * Shared by every loop strategy (tool-use, plan-execute, developer, bmad) so
+ * the defensive outer try/catch below lives in ONE place. Without it, a throw
+ * from a hook handler / permission resolver / the emit itself escapes the
+ * generator and leaves this (and any later) call as an orphan
+ * `tool_call_requested` with no matching `tool_result` — which the provider
+ * then rejects on the next turn.
  */
 export async function* dispatchToolCall(
   ctx: ModeContext,
@@ -83,12 +90,9 @@ export async function* dispatchToolCall(
       });
     }
   } catch (err) {
-    // Defensive: a hook handler, permission resolver, or the emit
-    // itself threw before we could produce a tool_result. Without this
-    // catch the throw would propagate out of the generator, exiting
-    // the loop and leaving this and any subsequent calls as orphan
-    // tool_call_requested events. Synthesize a failed result so the
-    // event log stays well-formed.
+    // Defensive: a hook handler, permission resolver, or the emit itself threw
+    // before we could produce a tool_result. Synthesize a failed result so the
+    // event log stays well-formed (no orphan tool_call_requested).
     const message = err instanceof Error ? err.message : String(err);
     yield await ctx.emit({
       type: 'tool_result',

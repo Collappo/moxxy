@@ -153,6 +153,7 @@ export {
   type ProjectMessagesOptions,
   type ProjectedMessages,
 } from './mode-helpers.js';
+export { dispatchToolCall } from './tool-dispatch.js';
 
 export type { TokenBudget, CompactContext, CompactorDef } from './compactor.js';
 export { estimateContextTokens, runCompactionIfNeeded } from './compactor-helpers.js';
