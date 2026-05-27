@@ -16,6 +16,11 @@ export function waitForCallback(opts: WaitForCallbackOpts): Promise<string> {
     const settle = (fn: () => void): void => {
       if (settled) return;
       settled = true;
+      // Single cleanup chokepoint: clear the timeout AND detach the abort
+      // listener on every exit (success/timeout/abort/error), so neither a
+      // dangling timer nor a lingering signal listener is left behind.
+      clearTimeout(timer);
+      opts.signal?.removeEventListener('abort', onAbort);
       if (server) server.close();
       fn();
     };

@@ -39,6 +39,25 @@ describe('createMcpPlugin', () => {
     expect(plugin.tools!.map((t) => t.name)).toEqual(['mcp__a__ping', 'mcp__b__ping']);
   });
 
+  it('closes already-connected clients when a later server fails to connect', async () => {
+    const closed: string[] = [];
+    let n = 0;
+    const factory = async (server: { name: string }): Promise<McpClientLike> => {
+      n++;
+      if (n === 2) throw new Error('second server connect failed');
+      return { ...fakeClient, async close() { closed.push(server.name); } };
+    };
+    await expect(
+      createMcpPlugin({
+        servers: [{ name: 'a', command: 'noop' }, { name: 'b', command: 'noop' }],
+        clientFactory: factory,
+      }),
+    ).rejects.toThrow(/second server connect failed/);
+    // The first server's client must have been closed (not leaked), even though
+    // we never returned the plugin and so its onShutdown hook was never wired.
+    expect(closed).toEqual(['a']);
+  });
+
   it('registers an onShutdown hook that closes all clients', async () => {
     let closed = 0;
     const c: McpClientLike = { ...fakeClient, async close() { closed++; } };

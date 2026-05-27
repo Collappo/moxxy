@@ -93,17 +93,20 @@ class Sidecar {
   private buffer = '';
   private readonly pending = new Map<string, PendingCall>();
   private startError: Error | null = null;
-  /** Optional listener for sidecar stderr lines — used by callers
-   *  that want install-progress feedback in their own logger/UI. */
-  private stderrListener: ((line: string) => void) | null = null;
+  /** Listeners for sidecar stderr lines — used by callers that want
+   *  install-progress feedback in their own logger/UI. A Set (not a single
+   *  slot) so concurrent browser_session calls don't clobber each other. */
+  private readonly stderrListeners = new Set<(line: string) => void>();
 
   constructor(
     private readonly sidecarPath: string,
     private readonly spawnFn: (path: string) => SidecarStream,
   ) {}
 
-  onStderr(fn: (line: string) => void): void {
-    this.stderrListener = fn;
+  /** Subscribe to sidecar stderr lines. Returns an unsubscribe function. */
+  onStderr(fn: (line: string) => void): () => void {
+    this.stderrListeners.add(fn);
+    return () => this.stderrListeners.delete(fn);
   }
 
   async ensure(): Promise<void> {
@@ -135,7 +138,7 @@ class Sidecar {
       while ((nl = stderrBuf.indexOf('\n')) !== -1) {
         const line = stderrBuf.slice(0, nl);
         stderrBuf = stderrBuf.slice(nl + 1);
-        if (line.trim() && this.stderrListener) this.stderrListener(line);
+        if (line.trim()) for (const fn of this.stderrListeners) fn(line);
       }
     });
     this.child.once('exit', (code) => {
@@ -177,17 +180,40 @@ class Sidecar {
     }
   }
 
-  async call(method: string, params: Record<string, unknown> = {}): Promise<unknown> {
+  async call(
+    method: string,
+    params: Record<string, unknown> = {},
+    signal?: AbortSignal,
+  ): Promise<unknown> {
     await this.ensure();
     if (!this.child) throw new Error('sidecar not running');
+    if (signal?.aborted) throw new Error('browser_session aborted');
     const id = randomUUID();
     const req = { id, method, params };
     return new Promise<unknown>((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
+      // Abort cancels ONLY this pending call (rejects its promise); it does
+      // NOT kill the shared singleton sidecar, which other concurrent calls
+      // depend on. A late reply for this id is then ignored (not in `pending`).
+      const onAbort = (): void => {
+        if (this.pending.delete(id)) reject(new Error('browser_session aborted'));
+      };
+      const cleanup = (): void => signal?.removeEventListener('abort', onAbort);
+      this.pending.set(id, {
+        resolve: (v) => {
+          cleanup();
+          resolve(v);
+        },
+        reject: (e) => {
+          cleanup();
+          reject(e);
+        },
+      });
+      signal?.addEventListener('abort', onAbort, { once: true });
       try {
         this.child!.stdin.write(JSON.stringify(req) + '\n');
       } catch (err) {
         this.pending.delete(id);
+        cleanup();
         reject(err instanceof Error ? err : new Error(String(err)));
       }
     });
@@ -244,44 +270,45 @@ export function buildBrowserSessionTool(deps?: BrowserSessionDeps) {
     permission: { action: 'prompt' },
     async handler({ action }, ctx) {
       const sidecar = getSidecar(deps);
-      // Surface install-progress lines (and any other sidecar status
-      // writes) through the tool ctx logger — visible in verbose mode
-      // and in the event log so the operator can see "downloading
-      // chromium…" instead of staring at an apparently-hung turn.
-      sidecar.onStderr((line) => ctx.logger.info('browser_session', { line }));
-      const onAbort = (): void => {
-        void sidecar.close();
-      };
-      ctx.signal.addEventListener('abort', onAbort, { once: true });
+      // Surface install-progress lines (and any other sidecar status writes)
+      // through this call's logger — visible in verbose mode and the event log
+      // ("downloading chromium…") instead of an apparently-hung turn. onStderr
+      // now supports concurrent subscribers and returns an unsubscribe.
+      const offStderr = sidecar.onStderr((line) => ctx.logger.info('browser_session', { line }));
+      // Per-call abort: pass ctx.signal so an abort cancels THIS call's RPC,
+      // rather than calling sidecar.close() which would tear down the shared
+      // singleton (and every other concurrent browser_session) on the bus.
+      const call = (method: string, params: Record<string, unknown> = {}): Promise<unknown> =>
+        sidecar.call(method, params, ctx.signal);
       try {
         switch (action.kind) {
           case 'goto':
-            return await sidecar.call('goto', {
+            return await call('goto', {
               url: action.url,
               waitUntil: action.waitUntil,
               timeoutMs: action.timeoutMs,
             });
           case 'click':
-            return await sidecar.call('click', { selector: action.selector, timeoutMs: action.timeoutMs });
+            return await call('click', { selector: action.selector, timeoutMs: action.timeoutMs });
           case 'fill':
-            return await sidecar.call('fill', {
+            return await call('fill', {
               selector: action.selector,
               value: action.value,
               timeoutMs: action.timeoutMs,
             });
           case 'text':
-            return await sidecar.call('text', { selector: action.selector });
+            return await call('text', { selector: action.selector });
           case 'html':
-            return await sidecar.call('html');
+            return await call('html');
           case 'screenshot':
-            return await sidecar.call('screenshot', { fullPage: action.fullPage });
+            return await call('screenshot', { fullPage: action.fullPage });
           case 'eval':
-            return await sidecar.call('eval', { expression: action.expression });
+            return await call('eval', { expression: action.expression });
           case 'url':
-            return await sidecar.call('url');
+            return await call('url');
         }
       } finally {
-        ctx.signal.removeEventListener('abort', onAbort);
+        offStderr();
       }
     },
   });

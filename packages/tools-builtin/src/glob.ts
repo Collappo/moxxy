@@ -81,10 +81,24 @@ async function* walk(
     if (signal.aborted) return;
     if (entry.name === 'node_modules' || entry.name === '.git' || entry.name === 'dist' || entry.name === '.turbo') continue;
     const full = path.join(cursor, entry.name);
-    if (entry.isDirectory() || entry.isSymbolicLink()) {
+    let isDir = entry.isDirectory();
+    let isFile = entry.isFile();
+    if (entry.isSymbolicLink()) {
+      // Resolve the link target's type so a dir-symlink is recursed (not also
+      // emitted as a file match) and a file-symlink is matched (not recursed).
+      // Without this both branches fired for any symlink.
+      try {
+        const st = await fs.stat(full);
+        isDir = st.isDirectory();
+        isFile = st.isFile();
+      } catch {
+        continue; // broken link
+      }
+    }
+    if (isDir) {
       yield* walk(root, regex, full, signal, visited);
     }
-    if (entry.isFile() || entry.isSymbolicLink()) {
+    if (isFile) {
       const relative = path.relative(root, full);
       if (regex.test(relative)) yield full;
     }
