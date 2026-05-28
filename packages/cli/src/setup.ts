@@ -16,7 +16,7 @@ import { buildVaultPlugin } from '@moxxy/plugin-vault';
 import { buildMemoryPlugin } from '@moxxy/plugin-memory';
 import { buildSessionConfigApplier } from './config-applier.js';
 import { loadRawConfig, resolveConfigPlaceholders } from './setup/load-config.js';
-import { buildEmbedder } from './setup/embedder.js';
+import { selectEmbedder } from './setup/embedder.js';
 import { buildSession } from './setup/build-session.js';
 import { buildBuiltinsCore } from './setup/builtins.js';
 import { buildSchedulerRunner } from './setup/scheduler-runner.js';
@@ -50,8 +50,6 @@ export async function setupSessionWithConfig(opts: SetupOptions): Promise<SetupR
   progress({ kind: 'config-loaded', sources: sources.length });
 
   const { plugin: vaultPlugin, vault } = buildVaultPlugin({ disableKeytar: opts.disableKeytar });
-  const embedder = await buildEmbedder(rawConfig.embeddings, logger);
-  const { plugin: memoryPlugin, store: memory } = buildMemoryPlugin({ embedder });
 
   // MCP servers are now lazy-loaded: the admin plugin's onInit hook
   // reads ~/.moxxy/mcp.json and registers stub tools using each
@@ -71,6 +69,13 @@ export async function setupSessionWithConfig(opts: SetupOptions): Promise<SetupR
     resolver: opts.resolver,
     resumeSessionId: opts.resumeSessionId,
     logger,
+  });
+
+  // Built AFTER the session so it can pull the registry-selected embedder
+  // lazily — the embedder isn't chosen until plugins have registered (see
+  // selectEmbedder below). A null active embedder → keyword recall.
+  const { plugin: memoryPlugin, store: memory } = buildMemoryPlugin({
+    embedder: () => session.embedders.tryGetActive(),
   });
 
   // Build the builtin list first WITHOUT the config plugin so we can pass the
@@ -106,6 +111,17 @@ export async function setupSessionWithConfig(opts: SetupOptions): Promise<SetupR
     count: pluginRegistration.registered.size,
     skipped: pluginRegistration.skipped.length,
   });
+
+  // Every plugin (incl. discovered embedder plugins) is registered now — pick
+  // the configured embedder onto session.embedders; memory reads it lazily.
+  await selectEmbedder(session, rawConfig.embeddings, logger);
+
+  // Bridge plugin-contributed isolators (from discovered `kind: 'isolator'`
+  // plugins) into the security layer's registry, BEFORE its onInit wraps tools.
+  // Opt-in only: registering an isolator never activates it — the user still
+  // selects one by name via `security.isolator`, so a discovered isolator can't
+  // silently become the sandbox boundary.
+  for (const iso of session.isolators.list()) security.registry.register(iso);
 
   const { credentialResolver } = await activateProvider({
     session,

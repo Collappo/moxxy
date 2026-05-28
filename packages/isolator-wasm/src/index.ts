@@ -3,8 +3,8 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { Buffer } from 'node:buffer';
 import * as path from 'node:path';
-import type { CapabilitySpec, IsolatedToolCall, Isolator } from '@moxxy/sdk';
-import { checkAllCaps, pathInScope } from '@moxxy/plugin-security';
+import { definePlugin, type CapabilitySpec, type IsolatedToolCall, type Isolator, type Plugin } from '@moxxy/sdk';
+import { checkAllCaps, pathInScope, buildBrokerEnv } from '@moxxy/plugin-security';
 
 /**
  * WebAssembly Isolator. Runs wasm handlers in V8's wasm VM — the
@@ -388,7 +388,18 @@ export function buildWasmHostImports(
         }
       }
       try {
-        const res = spawnSync(command, [...argv], { cwd, encoding: 'utf8' });
+        const res = spawnSync(command, [...argv], {
+          cwd,
+          encoding: 'utf8',
+          // Curate the child env through the tool's `caps.env` allowlist (or a
+          // minimal default) instead of inheriting ALL of process.env — passing
+          // no `env` would hand the child every API key/token/secret the host
+          // holds. Mirrors the async broker's exec env curation.
+          env: buildBrokerEnv(caps, undefined),
+          // Surface the tool's wall-clock budget so a runaway child is killed
+          // by spawnSync itself, not just the outer Promise.race timeout.
+          ...(caps.timeMs !== undefined ? { timeout: caps.timeMs } : {}),
+        });
         sendStr(
           outPtrOut,
           outLenOut,
@@ -478,3 +489,13 @@ export async function fetchWasmBytes(url: string): Promise<Uint8Array> {
 
 /** Default singleton. Use `createWasmIsolator({...})` to tune. */
 export const wasmIsolator: Isolator = createWasmIsolator();
+
+/**
+ * Auto-discovery entry: a user-installed copy registers the isolator via
+ * `PluginSpec.isolators`. Inert until opted into with `security.isolator: 'wasm'`.
+ */
+const plugin: Plugin = definePlugin({
+  name: '@moxxy/isolator-wasm',
+  isolators: [wasmIsolator],
+});
+export default plugin;

@@ -25,7 +25,7 @@
   "moxxy": {
     "plugin": {
       "entry": "./dist/index.js",
-      "kind": "hooks"
+      "kind": "isolator"
     }
   },
   "dependencies": {

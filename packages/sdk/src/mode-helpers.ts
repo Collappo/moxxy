@@ -12,6 +12,9 @@ import {
   toolResultStubbed,
 } from './elision-state.js';
 import { applyLazyTools } from './tool-gating.js';
+import { runCompactionIfNeeded } from './compactor-helpers.js';
+import { runElisionIfNeeded } from './elision-helpers.js';
+import { usageEventFields } from './token-accounting.js';
 
 /**
  * Shared bits used by every loop strategy: a typed tool-use struct and a
@@ -480,4 +483,119 @@ export async function collectProviderStream(
     finalToolUses.push({ id, name: partial.name, input: partial.input ?? {} });
   }
   return { text, toolUses: finalToolUses, stopReason, error, ...(usage ? { usage } : {}) };
+}
+
+/**
+ * Run a single-shot (no-tools) provider turn — the shape every planner /
+ * synthesis phase shares. Runs context management (compaction + elision),
+ * emits the `provider_request` bookend, streams the response with tools
+ * disabled, then emits either an `error` event (returning `null`) or the
+ * `provider_response` bookend (returning the collected text).
+ *
+ * Replaces the ~40-line block each mode phase used to inline; centralizing it
+ * keeps event emission uniform and means a fix here (e.g. always running
+ * elision) lands for every loop strategy at once.
+ */
+export async function runSingleShotTurn(
+  ctx: ModeContext,
+  messages: ReadonlyArray<ProviderMessage>,
+  opts: { maxTokens?: number } = {},
+): Promise<string | null> {
+  await runCompactionIfNeeded(ctx);
+  await runElisionIfNeeded(ctx);
+
+  await ctx.emit({
+    type: 'provider_request',
+    sessionId: ctx.sessionId,
+    turnId: ctx.turnId,
+    source: 'system',
+    provider: ctx.provider.name,
+    model: ctx.model,
+  });
+
+  const { text, usage, error } = await collectProviderStream(ctx, messages, {
+    includeTools: false,
+    ...(opts.maxTokens !== undefined ? { maxTokens: opts.maxTokens } : {}),
+  });
+  if (error) {
+    await ctx.emit({
+      type: 'error',
+      sessionId: ctx.sessionId,
+      turnId: ctx.turnId,
+      source: 'system',
+      kind: error.retryable ? 'retryable' : 'fatal',
+      message: error.message,
+    });
+    return null;
+  }
+
+  await ctx.emit({
+    type: 'provider_response',
+    sessionId: ctx.sessionId,
+    turnId: ctx.turnId,
+    source: 'system',
+    provider: ctx.provider.name,
+    model: ctx.model,
+    ...usageEventFields(usage),
+  });
+
+  return text;
+}
+
+/**
+ * Sliding-window detector for "model keeps making the same tool call".
+ *
+ * When the same `(toolName, input)` pair appears `repeatThreshold` times in
+ * the last `windowSize` calls, the model is almost certainly stuck — polling a
+ * tool that returns the same thing, mis-handling an error, etc. Bail early
+ * instead of burning through the iteration cap.
+ *
+ * Shared across every loop strategy so detection is uniform — previously each
+ * mode re-rolled this, and one copy used a non-canonical `JSON.stringify`
+ * signature that silently missed key-reordered repeats.
+ */
+export interface StuckLoopDetector {
+  readonly windowSize: number;
+  readonly repeatThreshold: number;
+  /** Record the call. Returns the number of identical calls in the window. */
+  record(toolName: string, input: unknown): number;
+}
+
+export function createStuckLoopDetector(
+  opts: { windowSize?: number; repeatThreshold?: number } = {},
+): StuckLoopDetector {
+  const windowSize = opts.windowSize ?? 8;
+  const repeatThreshold = opts.repeatThreshold ?? 3;
+  const recent: string[] = [];
+  return {
+    windowSize,
+    repeatThreshold,
+    record(toolName, input) {
+      const key = `${toolName}|${stableHash(input)}`;
+      recent.push(key);
+      if (recent.length > windowSize) recent.shift();
+      return recent.filter((k) => k === key).length;
+    },
+  };
+}
+
+/**
+ * Stable, key-order-canonical hash of a tool call's input, so `{a:1,b:2}` and
+ * `{b:2,a:1}` produce the same key. Use for any "have I seen this call before"
+ * comparison — a raw `JSON.stringify` is NOT order-stable.
+ */
+export function stableHash(input: unknown): string {
+  return canonicalize(input);
+}
+
+function canonicalize(value: unknown): string {
+  if (value === null || value === undefined) return 'null';
+  if (typeof value !== 'object') return JSON.stringify(value);
+  if (Array.isArray(value)) {
+    return '[' + value.map(canonicalize).join(',') + ']';
+  }
+  const entries = Object.entries(value as Record<string, unknown>).sort(
+    ([a], [b]) => (a < b ? -1 : a > b ? 1 : 0),
+  );
+  return '{' + entries.map(([k, v]) => JSON.stringify(k) + ':' + canonicalize(v)).join(',') + '}';
 }

@@ -27,12 +27,16 @@ import { ToolRegistryImpl, type ToolRegistry } from './registries/tools.js';
 import { AgentRegistry } from './registries/agents.js';
 import { CommandRegistry } from './registries/commands.js';
 import { TranscriberRegistry } from './registries/transcribers.js';
+import { EmbedderRegistry } from './registries/embedders.js';
+import { IsolatorRegistry } from './registries/isolators.js';
 import { RequirementRegistry } from './requirements.js';
 import { PermissionEngine } from './permissions/engine.js';
 import { autoAllowResolver } from './permissions/resolvers.js';
 import type {
   ApprovalResolver,
+  CredentialResolver,
   ElisionSettings,
+  McpAdminView,
   PendingToolCall,
   PermissionContext,
   PermissionResolver,
@@ -88,6 +92,8 @@ export class Session implements ClientSession, SessionRuntime {
   readonly agents: AgentRegistry;
   readonly commands: CommandRegistry;
   readonly transcribers: TranscriberRegistry;
+  readonly embedders: EmbedderRegistry;
+  readonly isolators: IsolatorRegistry;
   readonly requirements: RequirementRegistry;
   readonly permissions: PermissionEngine;
   /** Current PermissionResolver. Update via `setPermissionResolver(r)`. */
@@ -108,6 +114,15 @@ export class Session implements ClientSession, SessionRuntime {
   elisionSettings: ElisionSettings | null = null;
   /** Lazy tool loading toggle, from `config.context.lazyTools`. Default off. */
   lazyTools = false;
+  /**
+   * Live runtime capabilities the host installs on a local Session (see
+   * SessionLike). A RemoteSession leaves them undefined. Declared here — rather
+   * than monkey-patched on via `as unknown as` — so the host and channels get
+   * type-checked access.
+   */
+  readyProviders?: Set<string>;
+  credentialResolver?: CredentialResolver;
+  mcpAdmin?: McpAdminView;
   readonly dispatcher: HookDispatcherImpl;
   readonly pluginHost: PluginHost;
   private readonly controller = new AbortController();
@@ -135,6 +150,8 @@ export class Session implements ClientSession, SessionRuntime {
     this.agents = new AgentRegistry();
     this.commands = new CommandRegistry();
     this.transcribers = new TranscriberRegistry();
+    this.embedders = new EmbedderRegistry();
+    this.isolators = new IsolatorRegistry();
     this.requirements = new RequirementRegistry({
       tools: this.tools,
       providers: this.providers,
@@ -174,6 +191,8 @@ export class Session implements ClientSession, SessionRuntime {
       agents: this.agents,
       commands: this.commands,
       transcribers: this.transcribers,
+      embedders: this.embedders,
+      isolators: this.isolators,
       requirements: this.requirements,
       dispatcher: this.dispatcher,
       loader: opts.pluginLoader,
@@ -271,7 +290,7 @@ export class Session implements ClientSession, SessionRuntime {
       // No mode active yet (registry empty pre-boot) - report null.
     }
     const active = this.providers.getActiveName();
-    const ready = (this as unknown as { readyProviders?: ReadonlySet<string> }).readyProviders;
+    const ready = this.readyProviders;
     return {
       sessionId: this.id,
       cwd: this.cwd,

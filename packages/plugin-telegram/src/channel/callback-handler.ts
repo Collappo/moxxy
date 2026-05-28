@@ -144,9 +144,7 @@ async function handleModel(
   // backed providers (openai-codex) would surface a credential
   // error on the next turn. Match the TUI's wording so the user
   // sees the same setup command in both channels.
-  const ready =
-    (session as unknown as { readyProviders?: Set<string> }).readyProviders ??
-    new Set<string>();
+  const ready = session.readyProviders ?? new Set<string>();
   if (!ready.has(providerId)) {
     const cmd =
       providerId === 'openai-codex'
@@ -170,11 +168,7 @@ async function handleModel(
       // Resolve credentials and drop the cached instance, same as
       // the TUI. Without this the new provider gets createClient({})
       // and openai-codex throws "no OAuth credentials" on next turn.
-      const resolver = (
-        session as unknown as {
-          credentialResolver?: (name: string) => Promise<Record<string, unknown>>;
-        }
-      ).credentialResolver;
+      const resolver = session.credentialResolver;
       const cfg = resolver ? await resolver(providerId) : {};
       const def = session.providers.list().find((p) => p.name === providerId);
       if (def) session.providers.replace(def);

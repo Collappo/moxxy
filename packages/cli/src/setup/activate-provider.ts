@@ -1,7 +1,7 @@
 import type { Session } from '@moxxy/core';
 import type { MoxxyConfig } from '@moxxy/config';
 import type { VaultStore } from '@moxxy/plugin-vault';
-import { MoxxyError } from '@moxxy/sdk';
+import { MoxxyError, type CredentialResolver } from '@moxxy/sdk';
 import { resolveProviderCredentials } from '../provider-credentials.js';
 import type { BootStep } from './types.js';
 
@@ -10,7 +10,7 @@ type Logger = {
   warn(msg: string, meta?: Record<string, unknown>): void;
 };
 
-export type CredentialResolver = (providerName: string) => Promise<Record<string, unknown>>;
+export type { CredentialResolver };
 
 export interface ActivateProviderArgs {
   readonly session: Session;
@@ -120,7 +120,7 @@ export async function activateProvider(args: ActivateProviderArgs): Promise<Acti
       session.requirements.clearRuntime(`auth:provider:${p.name}`);
     }
   }
-  (session as unknown as { readyProviders: Set<string> }).readyProviders = readyProviders;
+  session.readyProviders = readyProviders;
 
   // Expose a credential resolver so runtime provider switches (TUI
   // /model picker, preference re-apply below) can re-resolve credentials
@@ -129,7 +129,7 @@ export async function activateProvider(args: ActivateProviderArgs): Promise<Acti
   // "no credentials" on the next turn.
   const credentialResolver: CredentialResolver = async (providerName) =>
     resolveProviderCredentials(providerName, vault, { interactive: false });
-  (session as unknown as { credentialResolver: CredentialResolver }).credentialResolver = credentialResolver;
+  session.credentialResolver = credentialResolver;
 
   return { activated, credentialResolver };
 }

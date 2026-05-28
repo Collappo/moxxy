@@ -17,13 +17,7 @@ export function useMcpStatus(session: Session): {
 } {
   const [mcpStatus, setMcpStatus] = useState<McpStatus>({ connected: 0, enabled: 0 });
   const refreshMcpStatus = React.useCallback(async () => {
-    const api = (
-      session as unknown as {
-        mcpAdmin?: {
-          listServers: () => Promise<ReadonlyArray<{ enabled: boolean; connected: boolean }>>;
-        };
-      }
-    ).mcpAdmin;
+    const api = session.mcpAdmin;
     if (!api?.listServers) return;
     try {
       const list = await api.listServers();

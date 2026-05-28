@@ -1,8 +1,7 @@
 import {
   buildSystemPromptWithSkills,
-  collectProviderStream,
-  runCompactionIfNeeded,
-  usageEventFields,
+  projectMessages,
+  runSingleShotTurn,
   type ModeContext,
   type ProviderMessage,
 } from '@moxxy/sdk';
@@ -20,45 +19,8 @@ export async function collectPhase(
   artifactsSoFar: Artifacts,
   redraftFeedback: string | null,
 ): Promise<string | null> {
-  await runCompactionIfNeeded(ctx);
   const messages = buildPhaseMessages(ctx, phase, artifactsSoFar, redraftFeedback);
-
-  await ctx.emit({
-    type: 'provider_request',
-    sessionId: ctx.sessionId,
-    turnId: ctx.turnId,
-    source: 'system',
-    provider: ctx.provider.name,
-    model: ctx.model,
-  });
-
-  const { text, usage, error } = await collectProviderStream(ctx, messages, {
-    includeTools: false,
-    maxTokens: phase.maxTokens,
-  });
-  if (error) {
-    await ctx.emit({
-      type: 'error',
-      sessionId: ctx.sessionId,
-      turnId: ctx.turnId,
-      source: 'system',
-      kind: error.retryable ? 'retryable' : 'fatal',
-      message: error.message,
-    });
-    return null;
-  }
-
-  await ctx.emit({
-    type: 'provider_response',
-    sessionId: ctx.sessionId,
-    turnId: ctx.turnId,
-    source: 'system',
-    provider: ctx.provider.name,
-    model: ctx.model,
-    ...usageEventFields(usage),
-  });
-
-  return text;
+  return runSingleShotTurn(ctx, messages, { maxTokens: phase.maxTokens });
 }
 
 function buildPhaseMessages(
@@ -67,7 +29,9 @@ function buildPhaseMessages(
   artifactsSoFar: Artifacts,
   redraftFeedback: string | null,
 ): ProviderMessage[] {
-  const userMessages = buildBaseMessages(ctx);
+  const systemWithSkills = buildSystemPromptWithSkills(ctx.systemPrompt, ctx.skills.list()) ?? '';
+  const systemPrompt = phase.system + (systemWithSkills ? `\n\n${systemWithSkills}` : '');
+  const messages = buildBaseMessages(ctx, systemPrompt);
 
   // Inject upstream artifacts (analysis + planning when in solutioning,
   // etc.) as a system-of-record block. We use a synthetic user turn
@@ -75,14 +39,14 @@ function buildPhaseMessages(
   // multi-system inputs inconsistently.
   const upstream = upstreamContext(phase.id, artifactsSoFar);
   if (upstream) {
-    userMessages.push({
+    messages.push({
       role: 'user',
       content: [{ type: 'text', text: upstream }],
     });
   }
 
   if (redraftFeedback) {
-    userMessages.push({
+    messages.push({
       role: 'user',
       content: [
         {
@@ -95,19 +59,7 @@ function buildPhaseMessages(
     });
   }
 
-  const systemWithSkills = buildSystemPromptWithSkills(ctx.systemPrompt, ctx.skills.list()) ?? '';
-  return [
-    {
-      role: 'system',
-      content: [
-        {
-          type: 'text',
-          text: phase.system + (systemWithSkills ? `\n\n${systemWithSkills}` : ''),
-        },
-      ],
-    },
-    ...userMessages,
-  ];
+  return messages;
 }
 
 function upstreamContext(phaseId: PhaseId, artifacts: Artifacts): string | null {
@@ -121,14 +73,11 @@ function upstreamContext(phaseId: PhaseId, artifacts: Artifacts): string | null 
   return parts.length === 0 ? null : parts.join('\n\n');
 }
 
-/** Just the user prompts from the log — used by every phase as the bottom
- *  layer; upstream artifacts and redraft feedback get layered on top. */
-function buildBaseMessages(ctx: ModeContext): ProviderMessage[] {
-  const out: ProviderMessage[] = [];
-  for (const e of ctx.log.slice()) {
-    if (e.type === 'user_prompt') {
-      out.push({ role: 'user', content: [{ type: 'text', text: e.text }] });
-    }
-  }
-  return out;
+/** Project the live log (with the phase system prompt) as the bottom layer;
+ *  upstream artifacts and redraft feedback get layered on top. Goes through
+ *  the shared `projectMessages` so artifact phases inherit compaction /
+ *  turn-boundary elision / orphan-tool_use synthesis like every other mode
+ *  (the previous hand-rolled `user_prompt`-only scan bypassed all three). */
+function buildBaseMessages(ctx: ModeContext, systemPrompt: string): ProviderMessage[] {
+  return projectMessages(ctx, { systemPrompt }).messages;
 }

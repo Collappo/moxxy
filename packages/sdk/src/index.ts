@@ -47,6 +47,9 @@ export type {
   ToolInfo,
   SkillInfo,
   CommandInfo,
+  CredentialResolver,
+  McpAdminView,
+  McpServerStatusView,
 } from './session-like.js';
 
 export type {
@@ -135,7 +138,21 @@ export type {
 } from './view-renderer.js';
 export { VIEW_PRIMITIVES, VIEW_COMPONENTS, DEFAULT_VIEW_TAGS } from './view-renderer.js';
 export type { TunnelProviderDef, TunnelHandle, TunnelOpenOptions } from './tunnel.js';
-export { isRetryableError, toFriendlyError, zodToJsonSchema, type StopReason } from './provider-utils.js';
+export { isRetryableError, toFriendlyError, zodToJsonSchema, estimateTextTokens, type StopReason } from './provider-utils.js';
+export { writeFileAtomic, moxxyHome, moxxyPath, type WriteFileAtomicOptions } from './fs-utils.js';
+export { createMutex, type Mutex } from './mutex.js';
+export { readRequestBody, bearerTokenMatches } from './http-utils.js';
+export {
+  autoAllowResolver,
+  denyByDefaultResolver,
+  createCallbackResolver,
+  createAllowListResolver,
+  createDeferredPermissionResolver,
+  type CallbackResolverOptions,
+  type PermissionPromptHandler,
+  type DeferredPermissionResolver,
+  type DeferredPermissionResolverOptions,
+} from './resolvers.js';
 export {
   MoxxyError,
   classifyHttpStatus,
@@ -145,13 +162,17 @@ export {
 } from './errors.js';
 export {
   collectProviderStream,
+  runSingleShotTurn,
   projectMessagesFromLog,
   projectMessages,
   buildSystemPromptWithSkills,
+  createStuckLoopDetector,
+  stableHash,
   type CollectedToolUse,
   type StreamResult,
   type ProjectMessagesOptions,
   type ProjectedMessages,
+  type StuckLoopDetector,
 } from './mode-helpers.js';
 export { dispatchToolCall } from './tool-dispatch.js';
 
@@ -245,7 +266,7 @@ export type {
   ChannelSubcommandContext,
   ChannelCommandArgs,
 } from './channel.js';
-export type { EmbeddingProvider } from './embedding.js';
+export type { EmbeddingProvider, EmbedderDef } from './embedding.js';
 export { CachedEmbeddingProvider } from './embedding-cache.js';
 
 export type {
@@ -281,6 +302,7 @@ export {
   definePermission,
   defineSkill,
   defineTranscriber,
+  defineEmbedder,
   defineCommand,
   defineAgent,
 } from './define.js';

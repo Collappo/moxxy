@@ -1,7 +1,6 @@
 import { promises as fs } from 'node:fs';
-import * as os from 'node:os';
 import * as path from 'node:path';
-import type { EmbeddingProvider } from '@moxxy/sdk';
+import { createMutex, moxxyPath, writeFileAtomic, type EmbeddingProvider, type Mutex } from '@moxxy/sdk';
 import { renderFrontmatter } from './parse.js';
 import { TfIdfEmbedder } from './tfidf.js';
 import { EmbeddingIndex } from './embedding-cache.js';
@@ -12,7 +11,7 @@ import {
   type MemoryType,
   type RecallMode,
 } from './store/types.js';
-import { isEnoent, listEntries, readEntry, safeRead, writeFileAtomic, writeIndex } from './store/io.js';
+import { isEnoent, listEntries, readEntry, safeRead, writeIndex } from './store/io.js';
 import { rankByKeywords, recallVector, type RankedMemory } from './store/search.js';
 
 export {
@@ -31,8 +30,13 @@ export interface MemoryStoreOptions {
    * Optional embedding provider. When supplied, `recall()` uses cosine
    * similarity over dense vectors. When omitted, the built-in TF-IDF
    * embedder is used. Pass `embedder: null` to force keyword-only recall.
+   *
+   * May also be a lazy resolver `() => EmbeddingProvider | null`, resolved once
+   * on first recall — so the host can wire the registry-selected embedder
+   * (`() => session.embedders.tryGetActive()`) that isn't known until plugins
+   * have loaded, without forcing the store to be built after the session.
    */
-  readonly embedder?: EmbeddingProvider | null;
+  readonly embedder?: EmbeddingProvider | null | (() => EmbeddingProvider | null);
   /**
    * Cache computed embeddings on disk (`<dir>/.embeddings.json`) so unchanged
    * memories aren't re-embedded on every recall. Defaults to true for all
@@ -43,40 +47,59 @@ export interface MemoryStoreOptions {
 }
 
 export function defaultMemoryDir(): string {
-  return path.join(os.homedir(), '.moxxy', 'memory');
+  return moxxyPath('memory');
 }
 
 export class MemoryStore {
   readonly dir: string;
-  private readonly embedder: EmbeddingProvider | null;
-  private readonly index: EmbeddingIndex | null;
-  // Per-instance mutex. save/update/forget each read-modify-write the entry
-  // file, MEMORY.md, and the embedding index; without serialization two
+  private readonly resolveEmbedder: () => EmbeddingProvider | null;
+  private readonly persistOpt: boolean | undefined;
+  // Embedder + index are resolved LAZILY on first recall (memoized), so a host
+  // that selects the embedder from a registry after plugins load can pass a
+  // resolver here without the store needing to be built after the session.
+  private embedderCache: EmbeddingProvider | null | undefined;
+  private indexCache: EmbeddingIndex | null | undefined;
+  // Per-instance mutex. save/update/forget/recall each read-modify-write the
+  // entry file, MEMORY.md, and the embedding index; without serialization two
   // overlapping calls clobber MEMORY.md and race the embedding cache.
-  private writeChain: Promise<unknown> = Promise.resolve();
+  private readonly mutex: Mutex = createMutex();
 
   constructor(opts: MemoryStoreOptions = {}) {
     this.dir = opts.dir ?? defaultMemoryDir();
-    if (opts.embedder === null) {
-      this.embedder = null;
-    } else if (opts.embedder !== undefined) {
-      this.embedder = opts.embedder;
+    this.persistOpt = opts.persistEmbeddings;
+    const e = opts.embedder;
+    if (typeof e === 'function') {
+      this.resolveEmbedder = e;
+    } else if (e === null) {
+      this.resolveEmbedder = () => null;
+    } else if (e !== undefined) {
+      this.resolveEmbedder = () => e;
     } else {
-      this.embedder = new TfIdfEmbedder();
+      const tfidf = new TfIdfEmbedder();
+      this.resolveEmbedder = () => tfidf;
     }
-    // TF-IDF's vocab depends on the whole corpus, so per-entry caching is
-    // useless — recompute every recall. For neural embedders, caching is
-    // a big win since each entry's vector is corpus-independent.
-    const isTfIdf = this.embedder instanceof TfIdfEmbedder;
-    const persist = opts.persistEmbeddings ?? (this.embedder !== null && !isTfIdf);
-    this.index =
-      persist && this.embedder
-        ? new EmbeddingIndex(this.dir, this.embedder.name, this.embedder.dim)
-        : null;
+  }
+
+  private getEmbedder(): EmbeddingProvider | null {
+    if (this.embedderCache === undefined) this.embedderCache = this.resolveEmbedder();
+    return this.embedderCache;
+  }
+
+  private getIndex(): EmbeddingIndex | null {
+    if (this.indexCache === undefined) {
+      const emb = this.getEmbedder();
+      // TF-IDF's vocab depends on the whole corpus, so per-entry caching is
+      // useless — recompute every recall. For neural embedders, caching is
+      // a big win since each entry's vector is corpus-independent.
+      const isTfIdf = emb instanceof TfIdfEmbedder;
+      const persist = this.persistOpt ?? (emb !== null && !isTfIdf);
+      this.indexCache = persist && emb ? new EmbeddingIndex(this.dir, emb.name, emb.dim) : null;
+    }
+    return this.indexCache;
   }
 
   get embedderName(): string {
-    return this.embedder?.name ?? 'keyword';
+    return this.getEmbedder()?.name ?? 'keyword';
   }
 
   list(filterType?: MemoryType): Promise<ReadonlyArray<MemoryEntry>> {
@@ -87,20 +110,10 @@ export class MemoryStore {
     return readEntry(this.fileFor(name));
   }
 
-  /** Run `fn` under the per-instance mutex (kept alive across rejections). */
-  private serialize<T>(fn: () => Promise<T>): Promise<T> {
-    const next = this.writeChain.then(fn, fn);
-    this.writeChain = next.then(
-      () => undefined,
-      () => undefined,
-    );
-    return next;
-  }
-
   save(
     input: Omit<MemoryFrontmatter, 'createdAt' | 'updatedAt'> & { body: string },
   ): Promise<MemoryEntry> {
-    return this.serialize(() => this.writeEntry(input));
+    return this.mutex.run(() => this.writeEntry(input));
   }
 
   update(
@@ -109,7 +122,7 @@ export class MemoryStore {
   ): Promise<MemoryEntry | null> {
     // Read-modify-write under the mutex; calls the internal (unserialized)
     // writer so it doesn't deadlock on its own chain.
-    return this.serialize(async () => {
+    return this.mutex.run(async () => {
       const existing = await readEntry(this.fileFor(name));
       if (!existing) return null;
       const mergedTags = patch.tags ?? existing.frontmatter.tags;
@@ -124,7 +137,7 @@ export class MemoryStore {
   }
 
   forget(name: string): Promise<boolean> {
-    return this.serialize(async () => {
+    return this.mutex.run(async () => {
       const filePath = this.fileFor(name);
       try {
         await fs.unlink(filePath);
@@ -175,9 +188,10 @@ export class MemoryStore {
     const all = await this.list(opts.type);
     if (all.length === 0) return [];
 
-    const useVector = mode === 'vector' || (mode === 'auto' && this.embedder !== null);
-    if (useVector && this.embedder) {
-      return recallVector(all, query, limit, this.embedder, this.index);
+    const embedder = this.getEmbedder();
+    const useVector = mode === 'vector' || (mode === 'auto' && embedder !== null);
+    if (useVector && embedder) {
+      return recallVector(all, query, limit, embedder, this.getIndex(), this.mutex);
     }
     return rankByKeywords(all, query, limit);
   }

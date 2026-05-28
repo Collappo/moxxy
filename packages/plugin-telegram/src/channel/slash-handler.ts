@@ -130,9 +130,7 @@ async function renderModelPicker(
   // failed credential resolution get a "(not connected)" suffix
   // and a tap on them surfaces the right setup command instead of
   // a no-op switch.
-  const ready =
-    (session as unknown as { readyProviders?: Set<string> }).readyProviders ??
-    new Set<string>();
+  const ready = session.readyProviders ?? new Set<string>();
   let count = 0;
   for (const p of providers) {
     for (const m of p.models) {

@@ -95,6 +95,33 @@ export interface SessionInfo {
 }
 
 /**
+ * Resolves a provider's stored credentials (vault tokens / API keys) into the
+ * config object `providers.setActive` needs. The host installs one on a local
+ * Session at boot; it is undefined across a `RemoteSession` transport (a closure
+ * can't cross the wire — the runner side resolves credentials there instead).
+ */
+export type CredentialResolver = (providerName: string) => Promise<Record<string, unknown>>;
+
+/** One server's status in {@link McpAdminView.listServers}. */
+export interface McpServerStatusView {
+  readonly name: string;
+  readonly enabled: boolean;
+  readonly connected: boolean;
+}
+
+/**
+ * The slice of the MCP admin API a channel needs to drive the MCP picker and
+ * status line. Present on a local Session when the MCP admin plugin is wired;
+ * a `RemoteSession` leaves {@link SessionLike.mcpAdmin} undefined and the UI
+ * degrades gracefully.
+ */
+export interface McpAdminView {
+  enableAndAttach(name: string): Promise<{ toolNames: ReadonlyArray<string> } | null>;
+  detach(name: string): Promise<boolean>;
+  listServers(): Promise<ReadonlyArray<McpServerStatusView>>;
+}
+
+/**
  * The session surface a `Channel` depends on, decoupled from whether the
  * session runs in-process (`@moxxy/core`'s `Session`) or is a thin-client
  * proxy (`RemoteSession` from `@moxxy/runner`). The same channel code drives
@@ -115,4 +142,17 @@ export interface SessionLike {
   /** Wire-friendly registry snapshot for rendering. */
   getInfo(): SessionInfo;
   close(reason?: string): Promise<void>;
+
+  /**
+   * Live runtime capabilities present only on an in-process Session; a
+   * `RemoteSession` thin client leaves them undefined, so callers MUST guard.
+   * For plain display prefer the serializable {@link getInfo} snapshot — these
+   * are for the mutate/guard paths a channel drives (provider switch, MCP picker).
+   */
+  /** Providers whose credentials resolved this session (live, mutable). */
+  readyProviders?: Set<string>;
+  /** Re-resolves a provider's credentials before `providers.setActive`. */
+  credentialResolver?: CredentialResolver;
+  /** MCP admin slice backing the MCP picker / status line. */
+  mcpAdmin?: McpAdminView;
 }

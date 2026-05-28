@@ -14,6 +14,8 @@ import type {
   ResolvedPluginManifest,
   ToolDef,
   TranscriberDef,
+  EmbedderDef,
+  Isolator,
   ViewRendererDef,
   TunnelProviderDef,
 } from '@moxxy/sdk';
@@ -29,6 +31,8 @@ import type { ModeRegistry } from '../registries/modes.js';
 import type { ProviderRegistry } from '../registries/providers.js';
 import type { ToolRegistry } from '../registries/tools.js';
 import type { TranscriberRegistry } from '../registries/transcribers.js';
+import type { EmbedderRegistry } from '../registries/embedders.js';
+import type { IsolatorRegistry } from '../registries/isolators.js';
 import type { HookDispatcherImpl } from './lifecycle.js';
 import type { RequirementRegistry } from '../requirements.js';
 import { discoverPlugins } from './discovery.js';
@@ -48,6 +52,8 @@ export interface PluginHostOptions {
   readonly agents: AgentRegistry;
   readonly commands: CommandRegistry;
   readonly transcribers: TranscriberRegistry;
+  readonly embedders: EmbedderRegistry;
+  readonly isolators: IsolatorRegistry;
   readonly requirements: RequirementRegistry;
   readonly dispatcher: HookDispatcherImpl;
   readonly loader?: PluginLoader;
@@ -116,6 +122,8 @@ interface LoadedRecord {
   readonly agentNames: ReadonlyArray<string>;
   readonly commandNames: ReadonlyArray<string>;
   readonly transcriberNames: ReadonlyArray<string>;
+  readonly embedderNames: ReadonlyArray<string>;
+  readonly isolatorNames: ReadonlyArray<string>;
 }
 
 export class PluginHost implements PluginHostHandle {
@@ -234,6 +242,8 @@ export class PluginHost implements PluginHostHandle {
     for (const agentName of record.agentNames) this.opts.agents.unregister(agentName);
     for (const cmdName of record.commandNames) this.opts.commands.unregister(cmdName);
     for (const transcriberName of record.transcriberNames) this.opts.transcribers.unregister(transcriberName);
+    for (const embedderName of record.embedderNames) this.opts.embedders.unregister(embedderName);
+    for (const isolatorName of record.isolatorNames) this.opts.isolators.unregister(isolatorName);
     this.loaded.delete(name);
     this.opts.requirements.unregisterPlugin(record.plugin.name);
     this.refreshDispatcher();
@@ -270,6 +280,8 @@ export class PluginHost implements PluginHostHandle {
     const agentNames = (plugin.agents ?? []).map((a: AgentDef) => a.name);
     const commandNames = (plugin.commands ?? []).map((c: CommandDef) => c.name);
     const transcriberNames = (plugin.transcribers ?? []).map((t: TranscriberDef) => t.name);
+    const embedderNames = (plugin.embedders ?? []).map((e: EmbedderDef) => e.name);
+    const isolatorNames = (plugin.isolators ?? []).map((i: Isolator) => i.name);
 
     for (const tool of plugin.tools ?? []) this.opts.tools.register(tool);
     for (const provider of plugin.providers ?? []) this.opts.providers.register(provider);
@@ -285,6 +297,8 @@ export class PluginHost implements PluginHostHandle {
     for (const agent of plugin.agents ?? []) this.opts.agents.register(agent);
     for (const cmd of plugin.commands ?? []) this.opts.commands.register(cmd);
     for (const transcriber of plugin.transcribers ?? []) this.opts.transcribers.register(transcriber);
+    for (const embedder of plugin.embedders ?? []) this.opts.embedders.register(embedder);
+    for (const isolator of plugin.isolators ?? []) this.opts.isolators.register(isolator);
 
     return {
       plugin,
@@ -300,6 +314,8 @@ export class PluginHost implements PluginHostHandle {
       agentNames,
       commandNames,
       transcriberNames,
+      embedderNames,
+      isolatorNames,
     };
   }
 
