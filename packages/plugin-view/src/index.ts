@@ -40,13 +40,14 @@ export function buildViewPlugin(opts: BuildViewPluginOptions): Plugin {
   const presentView = defineTool({
     name: 'present_view',
     description:
-      'Render a screen of a navigable web app from a view-spec (JSX-like, allow-listed tags). ' +
-      'Read the `build-app` skill first. Use this only when the user explicitly asks you to build/make ' +
-      'an app, platform, search engine, website, or dashboard — NOT for ordinary searches or questions. ' +
-      'Give each screen a <view name>; call once per screen. The view appears on the ' +
-      "user's web surface; share the returned `url` with them. When the user interacts (submits a " +
-      'form / clicks a button) it arrives as a normal follow-up user message containing a ' +
-      '`[ui-action]` block — read it and respond, usually by calling present_view again.',
+      'Render a screen of a generative UI (a "generative / dynamic / agentic UI") from a view-spec ' +
+      '(JSX-like, allow-listed tags). Read the `generative-ui` skill first. Use this only when the ' +
+      'user explicitly asks for a generative / dynamic / agentic UI (or interactive UI) for X — NOT ' +
+      "for ordinary searches or questions, which stay plain text. Give each screen a <view name>; " +
+      'call once per screen. The view appears on the user’s web surface; share the returned `url` ' +
+      'with them. When the user interacts (submits a form / clicks a button) it arrives as a normal ' +
+      'follow-up user message containing a `[ui-action]` block — read it and respond, usually by ' +
+      'calling present_view again under the same `name` to update the screen in place.',
     inputSchema: z.object({
       spec: z
         .string()
