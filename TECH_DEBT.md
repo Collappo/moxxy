@@ -91,11 +91,12 @@ three first-party isolators now contribute their `Isolator` + ship a discovery `
 isolator is registered-but-inert and never auto-activated, so installing one can't silently weaken
 the sandbox. A user can install a custom `kind: 'isolator'` plugin and opt in by name.
 
-### 6. Add a tool/platform `MoxxyErrorCode`
-Flagged by the tools-builtin and computer-control fix agents (see Blocked §B2). `MoxxyErrorCode` is a
-fixed union with no IO/tool/platform/ABORTED member, so tool failures were wrapped as `INTERNAL`.
-**Action:** add e.g. `TOOL_ERROR` / `PLATFORM_UNSUPPORTED` / `ABORTED` to `packages/sdk/src/errors.ts`
-and re-tag the `INTERNAL` placeholders in tools-builtin / computer-control.
+### 6. Add a tool/abort `MoxxyErrorCode` — ✅ DONE
+Added `TOOL_ERROR` (tool handler failure) and `ABORTED` (cancelled / timeout kill) to
+`MoxxyErrorCode`. Re-tagged the `INTERNAL` placeholders: abort-before-start + the Bash timeout →
+`ABORTED` (4 sites; the timeout was previously mis-tagged `NETWORK_TIMEOUT`, which made it falsely
+retryable); generic tool failures across tools-builtin + plugin-computer-control → `TOOL_ERROR`
+(24 sites). No exhaustive `switch` on the code exists, so adding members is safe.
 
 ### 7. Shared HTTP-channel server base
 **Cross-cut 1.4.** `readRequestBody` + `bearerTokenMatches` are now shared (done), but each HTTP
@@ -124,9 +125,11 @@ JSON-RPC boundary as strings — low value), and any remaining `throw new Error`
 Route remaining non-OK HTTP paths through `classifyHttpStatus`. Optionally lint-ban bare
 `throw new Error` inside handler bodies.
 
-### 11. Persisted-config read validation parity
-**Cross-cut 2.12.** provider-admin + mcp now Zod-validate reads (done); audit any remaining store
-that still does `JSON.parse(...) as T` with only a shallow shape check and bring it to `safeParse`.
+### 11. Persisted-config read validation parity — ✅ DONE
+**Cross-cut 2.12.** provider-admin + mcp (Phase 2) and now `plugin-channel-web/tunnel-settings.ts`
+Zod-validate their persisted-config reads (`safeParse`, discard on failure). The remaining
+`JSON.parse(...) as T` sites are line/wire-protocol parses (session-log events, MCP/JSON-RPC frames,
+SSE, package.json) — not persisted-config reads — so they're out of this finding's scope.
 
 ---
 
@@ -138,8 +141,10 @@ they're low-risk polish. Notable clusters worth a future pass:
   (was a static `'transformers'`), so different models get distinct cache namespaces in
   `CachedEmbeddingProvider` / the memory `EmbeddingIndex` (cross-cut 1.11).
 - `plugin-memory` could wrap its raw embedder in the SDK `CachedEmbeddingProvider` instead of the
-  parallel `EmbeddingIndex` cache (cross-cut 1.11) — the atomic-write + recall-race fixes are already in,
-  so this is now pure simplification.
+  parallel `EmbeddingIndex` cache (cross-cut 1.11). **Deferred:** now that the atomic-write +
+  recall-race bugs are fixed in `EmbeddingIndex`, this is pure dedup of caching logic — and it would
+  refactor the (subtle, mutex-guarded) recall path for low remaining value. Not worth the risk
+  standalone; fold in if the recall path is touched for another reason.
 - Spurious/again-audited `@moxxy/core` prod deps: removed from webhooks/scheduler; **kept** on
   plugin-subagents/plugin-view (their `*.test.ts` import core — devDep is correct) and on
   plugin-cli/plugin-telegram (real core imports: `loadUsageStats`, `PermissionEngine`, `savePreferences`,
@@ -152,7 +157,7 @@ they're low-risk polish. Notable clusters worth a future pass:
 
 - **B1.** oauth: collapse legacy `runDeviceCodeFlow` onto the rfc8628 adapter — ✅ resolved via a
   shared-helper extraction (P1 #3 DONE) rather than a full collapse, preserving each flow's genuine difference.
-- **B2.** tools-builtin / computer-control: no tool/platform `MoxxyErrorCode` exists; used `INTERNAL`. → P2 #6.
+- **B2.** tools-builtin / computer-control: no tool/platform `MoxxyErrorCode` exists; used `INTERNAL`. → ✅ resolved (P2 #6 DONE: added `TOOL_ERROR`/`ABORTED`, re-tagged).
 - **B3.** plugin-cli/plugin-telegram: kept `@moxxy/core` dep (real imports remain). → P3.
 - **B4.** plugin-subagents/plugin-view: kept `@moxxy/core` **dev**Dep — `*.test.ts` import `collectTurn` /
   `defaultViewRenderer` / `Session` from core. (The audit's "zero core imports in src" premise missed test files.)

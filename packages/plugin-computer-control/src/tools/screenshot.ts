@@ -91,7 +91,7 @@ export const screenshotTool = defineTool({
     });
     if (cap.exitCode !== 0) {
       throw new MoxxyError({
-        code: 'INTERNAL',
+        code: 'TOOL_ERROR',
         message: `screencapture failed (exit ${cap.exitCode}): ${cap.stderr.trim() || '(no stderr — likely Screen Recording permission missing — grant in System Settings → Privacy & Security)'}`,
         context: { tool: 'computer_screenshot', exitCode: cap.exitCode },
       });
@@ -125,7 +125,7 @@ export const screenshotTool = defineTool({
     if (sip.exitCode !== 0) {
       await fs.rm(outTmp, { force: true });
       throw new MoxxyError({
-        code: 'INTERNAL',
+        code: 'TOOL_ERROR',
         message: `sips resize/convert failed (exit ${sip.exitCode}): ${sip.stderr.trim() || '(no error message)'}`,
         context: { tool: 'computer_screenshot', exitCode: sip.exitCode },
       });
@@ -135,7 +135,7 @@ export const screenshotTool = defineTool({
       const bytes = await fs.readFile(outTmp);
       if (bytes.length > MAX_BYTES) {
         throw new MoxxyError({
-          code: 'INTERNAL',
+          code: 'TOOL_ERROR',
           message:
             `screenshot exceeded ${MAX_BYTES} bytes after compression (got ${bytes.length}). ` +
             `Lower maxDim (currently ${dim}) or quality (currently ${q}), or pass a smaller region.`,

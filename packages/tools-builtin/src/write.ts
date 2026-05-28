@@ -26,7 +26,7 @@ export const writeTool = defineTool({
     // Bail before touching disk if the turn was already aborted: a partial
     // write here would corrupt the user's file for no benefit.
     if (ctx.signal.aborted) {
-      throw new MoxxyError({ code: 'INTERNAL', message: `Write aborted before start: ${resolved}` });
+      throw new MoxxyError({ code: 'ABORTED', message: `Write aborted before start: ${resolved}` });
     }
     // Atomic whole-file write (tmp + rename) so a crash/abort mid-write can't
     // leave a truncated file. writeFileAtomic creates parent dirs.

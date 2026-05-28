@@ -26,7 +26,7 @@ export const clipboardTool = defineTool({
       });
       if (proc.exitCode !== 0) {
         throw new MoxxyError({
-          code: 'INTERNAL',
+          code: 'TOOL_ERROR',
           message: `pbpaste failed (exit ${proc.exitCode}): ${proc.stderr.trim()}`,
           context: { tool: 'computer_clipboard', exitCode: proc.exitCode },
         });
@@ -35,7 +35,7 @@ export const clipboardTool = defineTool({
     }
     if (text === undefined) {
       throw new MoxxyError({
-        code: 'INTERNAL',
+        code: 'TOOL_ERROR',
         message: 'computer_clipboard: `text` is required when action="write"',
         context: { tool: 'computer_clipboard' },
       });
@@ -47,7 +47,7 @@ export const clipboardTool = defineTool({
     });
     if (proc.exitCode !== 0) {
       throw new MoxxyError({
-        code: 'INTERNAL',
+        code: 'TOOL_ERROR',
         message: `pbcopy failed (exit ${proc.exitCode}): ${proc.stderr.trim()}`,
         context: { tool: 'computer_clipboard', exitCode: proc.exitCode },
       });

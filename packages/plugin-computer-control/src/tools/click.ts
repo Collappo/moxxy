@@ -39,7 +39,7 @@ export const clickTool = defineTool({
     });
     if (proc.exitCode !== 0) {
       throw new MoxxyError({
-        code: 'INTERNAL',
+        code: 'TOOL_ERROR',
         message: `click failed (exit ${proc.exitCode}): ${proc.stderr.trim() || '(check Accessibility permission in System Settings → Privacy & Security → Accessibility)'}`,
         context: { tool: 'computer_click', exitCode: proc.exitCode },
       });

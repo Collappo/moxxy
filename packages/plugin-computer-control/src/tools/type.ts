@@ -38,7 +38,7 @@ export const typeTool = defineTool({
     });
     if (proc.exitCode !== 0) {
       throw new MoxxyError({
-        code: 'INTERNAL',
+        code: 'TOOL_ERROR',
         message: `type failed (exit ${proc.exitCode}): ${proc.stderr.trim() || '(check Accessibility permission)'}`,
         context: { tool: 'computer_type', exitCode: proc.exitCode },
       });

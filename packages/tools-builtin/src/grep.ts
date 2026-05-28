@@ -35,7 +35,7 @@ export const grepTool = defineTool({
       // A malformed user pattern would otherwise throw a raw SyntaxError;
       // surface it as a clean, actionable tool error instead.
       throw new MoxxyError({
-        code: 'INTERNAL',
+        code: 'TOOL_ERROR',
         message: `Grep: invalid regular expression ${JSON.stringify(pattern)}: ${(e as Error).message}`,
       });
     }

@@ -78,7 +78,7 @@ export const keyTool = defineTool({
       script = `tell application "System Events" to keystroke ${literal}${usingClause}`;
     } else {
       throw new MoxxyError({
-        code: 'INTERNAL',
+        code: 'TOOL_ERROR',
         message: `unknown key "${key}". Use a single character or one of: ${Object.keys(KEY_CODES).join(', ')}.`,
         context: { tool: 'computer_key', key },
       });
@@ -89,7 +89,7 @@ export const keyTool = defineTool({
     });
     if (proc.exitCode !== 0) {
       throw new MoxxyError({
-        code: 'INTERNAL',
+        code: 'TOOL_ERROR',
         message: `key failed (exit ${proc.exitCode}): ${proc.stderr.trim() || '(check Accessibility permission)'}`,
         context: { tool: 'computer_key', exitCode: proc.exitCode },
       });

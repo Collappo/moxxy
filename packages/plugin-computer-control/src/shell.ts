@@ -148,7 +148,7 @@ export function runProcessBinary(
 export function ensureDarwin(toolName: string): void {
   if (!IS_DARWIN) {
     throw new MoxxyError({
-      code: 'INTERNAL',
+      code: 'TOOL_ERROR',
       message: `${toolName}: @moxxy/plugin-computer-control currently only supports macOS (process.platform = ${process.platform})`,
       context: { tool: toolName, platform: process.platform },
     });

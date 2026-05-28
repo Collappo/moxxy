@@ -31,7 +31,7 @@ export const openTool = defineTool({
     ensureDarwin('computer_open');
     if (!target && !app) {
       throw new MoxxyError({
-        code: 'INTERNAL',
+        code: 'TOOL_ERROR',
         message: 'computer_open: at least one of `target` or `app` is required',
         context: { tool: 'computer_open' },
       });
@@ -49,7 +49,7 @@ export const openTool = defineTool({
     });
     if (proc.exitCode !== 0) {
       throw new MoxxyError({
-        code: 'INTERNAL',
+        code: 'TOOL_ERROR',
         message: `open failed (exit ${proc.exitCode}): ${proc.stderr.trim() || '(no error message)'}`,
         context: { tool: 'computer_open', exitCode: proc.exitCode },
       });

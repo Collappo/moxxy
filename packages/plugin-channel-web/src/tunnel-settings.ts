@@ -1,5 +1,8 @@
 import { readFileSync } from 'node:fs';
-import { moxxyPath, writeFileAtomic } from '@moxxy/sdk';
+import { moxxyPath, writeFileAtomic, z } from '@moxxy/sdk';
+
+/** Validates the on-disk web.json shape; a corrupt/foreign file is discarded. */
+const webSettingsSchema = z.object({ tunnel: z.string().optional() });
 
 /**
  * Persisted, user/agent-changeable choice of tunnel provider for the web
@@ -25,8 +28,8 @@ export function normalizeTunnelName(name: string): string {
 
 export function readWebSettings(file = webSettingsPath()): WebSettings {
   try {
-    const parsed = JSON.parse(readFileSync(file, 'utf8')) as WebSettings;
-    return parsed && typeof parsed === 'object' ? parsed : {};
+    const parsed = webSettingsSchema.safeParse(JSON.parse(readFileSync(file, 'utf8')));
+    return parsed.success ? parsed.data : {};
   } catch {
     return {};
   }

@@ -28,7 +28,7 @@ export const applescriptTool = defineTool({
     });
     if (proc.exitCode !== 0) {
       throw new MoxxyError({
-        code: 'INTERNAL',
+        code: 'TOOL_ERROR',
         message: `osascript failed (exit ${proc.exitCode}): ${proc.stderr.trim() || '(no error message)'}`,
         context: { tool: 'computer_applescript', exitCode: proc.exitCode },
       });

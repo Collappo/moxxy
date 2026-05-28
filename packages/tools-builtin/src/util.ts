@@ -28,7 +28,7 @@ export function resolveWithinCwd(cwd: string, target: string): string {
   const rel = path.relative(cwdAbs, resolved);
   if (rel.startsWith('..') || path.isAbsolute(rel)) {
     throw new MoxxyError({
-      code: 'INTERNAL',
+      code: 'TOOL_ERROR',
       message: `Path escapes cwd: ${target} (resolved to ${resolved}, outside ${cwdAbs})`,
     });
   }

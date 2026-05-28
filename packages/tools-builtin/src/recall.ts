@@ -67,16 +67,16 @@ export const recallTool = defineTool({
           e.type === 'tool_call_requested' && e.callId === callId,
       );
       if (req) return present(`${req.name}(${safeJson(req.input)})`, summarize);
-      throw new MoxxyError({ code: 'INTERNAL', message: `recall: no event found for callId "${callId}".` });
+      throw new MoxxyError({ code: 'TOOL_ERROR', message: `recall: no event found for callId "${callId}".` });
     }
 
     if (seq != null) {
       const e = ctx.log.at(seq);
-      if (!e) throw new MoxxyError({ code: 'INTERNAL', message: `recall: no event at seq ${seq}.` });
+      if (!e) throw new MoxxyError({ code: 'TOOL_ERROR', message: `recall: no event at seq ${seq}.` });
       const text = renderEvent(e);
       if (!text)
         throw new MoxxyError({
-          code: 'INTERNAL',
+          code: 'TOOL_ERROR',
           message: `recall: event at seq ${seq} has no recallable content.`,
         });
       return present(text, summarize);
@@ -87,14 +87,14 @@ export const recallTool = defineTool({
       const body = turnEvents.map(renderEvent).filter(Boolean).join('\n\n');
       if (!body)
         throw new MoxxyError({
-          code: 'INTERNAL',
+          code: 'TOOL_ERROR',
           message: `recall: no recallable content for turn "${turnId}".`,
         });
       return present(body, summarize);
     }
 
     throw new MoxxyError({
-      code: 'INTERNAL',
+      code: 'TOOL_ERROR',
       message: 'recall: provide one of `callId`, `seq`, or `turnId`.',
     });
   },

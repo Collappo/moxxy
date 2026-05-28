@@ -35,7 +35,7 @@ export const bashTool = defineTool({
     // below would never run and the child would ignore the abort entirely.
     // Reject up front rather than spawning a process we can't cancel.
     if (ctx.signal.aborted) {
-      throw new MoxxyError({ code: 'INTERNAL', message: `Bash aborted before start: ${command}` });
+      throw new MoxxyError({ code: 'ABORTED', message: `Bash aborted before start: ${command}` });
     }
     return await new Promise<string>((resolve, reject) => {
       const child = spawn('/bin/sh', ['-lc', command], {
@@ -53,7 +53,7 @@ export const bashTool = defineTool({
         child.kill('SIGTERM');
         reject(
           new MoxxyError({
-            code: 'NETWORK_TIMEOUT',
+            code: 'ABORTED',
             message: `Bash timed out after ${timeoutMs}ms: ${command}`,
           }),
         );

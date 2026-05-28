@@ -49,6 +49,9 @@ export type MoxxyErrorCode =
   | 'CONFIG_INVALID'
   | 'PLUGIN_LOAD_FAILED'
   | 'UNKNOWN_COMMAND'
+  // --- Tool / runtime ---
+  | 'TOOL_ERROR'               // a tool handler failed (bad input, not-found, exec error)
+  | 'ABORTED'                  // operation cancelled — turn abort signal or timeout kill
   // --- Catch-all ---
   | 'INTERNAL';
 
