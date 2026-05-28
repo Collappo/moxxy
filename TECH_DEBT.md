@@ -134,9 +134,9 @@ that still does `JSON.parse(...) as T` with only a shallow shape check and bring
 
 121 low-severity findings remain (naming, comment hygiene, minor KISS). Not individually tracked here —
 they're low-risk polish. Notable clusters worth a future pass:
-- `plugin-embeddings-transformers`: `TransformersEmbedder.name` is a static `'transformers'` regardless
-  of model, which collides cache namespaces in `CachedEmbeddingProvider` (cross-cut 1.11). Make `name`
-  include the model id.
+- ✅ DONE — `plugin-embeddings-transformers`: `TransformersEmbedder.name` is now `transformers:<model>`
+  (was a static `'transformers'`), so different models get distinct cache namespaces in
+  `CachedEmbeddingProvider` / the memory `EmbeddingIndex` (cross-cut 1.11).
 - `plugin-memory` could wrap its raw embedder in the SDK `CachedEmbeddingProvider` instead of the
   parallel `EmbeddingIndex` cache (cross-cut 1.11) — the atomic-write + recall-race fixes are already in,
   so this is now pure simplification.

@@ -37,7 +37,12 @@ export interface TransformersEmbedderOptions {
 const DEFAULT_MODEL = 'Xenova/all-MiniLM-L6-v2';
 
 export class TransformersEmbedder implements EmbeddingProvider {
-  readonly name = 'transformers';
+  /**
+   * Model-scoped so different transformer models get distinct cache
+   * namespaces. A static `'transformers'` collides every model's vectors in
+   * `CachedEmbeddingProvider` / the memory `EmbeddingIndex` (keyed on `name`).
+   */
+  readonly name: string;
   readonly model: string;
   private readonly explicitDim?: number;
   private readonly pipelineFactory: PipelineFactory | null;
@@ -46,6 +51,7 @@ export class TransformersEmbedder implements EmbeddingProvider {
 
   constructor(opts: TransformersEmbedderOptions = {}) {
     this.model = opts.model ?? DEFAULT_MODEL;
+    this.name = `transformers:${this.model}`;
     this.explicitDim = opts.dimensions;
     this.pipelineFactory = opts.pipelineFactory ?? null;
     if (opts.cacheDir) {
