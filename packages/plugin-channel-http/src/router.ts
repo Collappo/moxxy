@@ -1,3 +1,4 @@
+import { timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { ClientSession as Session } from '@moxxy/sdk';
@@ -43,8 +44,12 @@ export async function handleHealth(
 
 function checkAuth(req: IncomingMessage, expected: string | null): boolean {
   if (!expected) return true;
-  const header = req.headers.authorization ?? '';
-  return header === `Bearer ${expected}`;
+  const got = Buffer.from(req.headers.authorization ?? '');
+  const want = Buffer.from(`Bearer ${expected}`);
+  // Constant-time compare so the token isn't recoverable byte-by-byte via
+  // response-timing. (The length check short-circuits unequal lengths — that
+  // only leaks length, which is fine for a fixed-format bearer token.)
+  return got.length === want.length && timingSafeEqual(got, want);
 }
 
 async function readBody(req: IncomingMessage, max = 64 * 1024): Promise<string> {
@@ -237,6 +242,12 @@ export async function handleTurnStream(
     connection: 'keep-alive',
   });
 
+  // Abort the turn when the client hangs up — without this the model keeps
+  // generating (and billing) with nothing consuming the SSE stream.
+  const controller = new AbortController();
+  const onClose = (): void => controller.abort();
+  res.on('close', onClose);
+
   const writeEvent = (event: MoxxyEvent): void => {
     res.write(`data: ${JSON.stringify(event)}\n\n`);
   };
@@ -245,6 +256,7 @@ export async function handleTurnStream(
     for await (const event of ctx.session.runTurn(body.prompt, {
       ...(body.model ? { model: body.model } : {}),
       ...(body.systemPrompt ? { systemPrompt: body.systemPrompt } : {}),
+      signal: controller.signal,
     })) {
       writeEvent(event);
     }
@@ -252,6 +264,7 @@ export async function handleTurnStream(
   } catch (err) {
     res.write(`event: error\ndata: ${JSON.stringify({ message: err instanceof Error ? err.message : String(err) })}\n\n`);
   } finally {
+    res.off('close', onClose);
     res.end();
   }
 }

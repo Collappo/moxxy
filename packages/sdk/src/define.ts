@@ -1,4 +1,7 @@
+import type { AgentDef } from './agent.js';
+import type { CacheStrategyDef } from './cache-strategy.js';
 import type { ChannelDef } from './channel.js';
+import type { CommandDef } from './command.js';
 import type { CompactorDef } from './compactor.js';
 import type { ModeDef } from './mode.js';
 import type { PermissionRule } from './permission.js';
@@ -8,6 +11,8 @@ import type { SkillDef, SkillFrontmatter } from './skill.js';
 import type { ToolCompactPresentation, ToolContext, ToolDef } from './tool.js';
 import type { ToolIsolationSpec } from './isolation.js';
 import type { TranscriberDef } from './transcriber.js';
+import type { ViewRendererDef } from './view-renderer.js';
+import type { TunnelProviderDef } from './tunnel.js';
 import type { z } from 'zod';
 
 export function definePlugin(spec: PluginSpec): Plugin {
@@ -69,6 +74,18 @@ export function defineCompactor(spec: CompactorDef): CompactorDef {
   return Object.freeze(spec);
 }
 
+export function defineCacheStrategy(spec: CacheStrategyDef): CacheStrategyDef {
+  return Object.freeze(spec);
+}
+
+export function defineViewRenderer(spec: ViewRendererDef): ViewRendererDef {
+  return Object.freeze(spec);
+}
+
+export function defineTunnelProvider(spec: TunnelProviderDef): TunnelProviderDef {
+  return Object.freeze(spec);
+}
+
 export function defineChannel<TStartOpts = unknown>(
   spec: ChannelDef<TStartOpts>,
 ): ChannelDef<TStartOpts> {
@@ -84,5 +101,13 @@ export function defineSkill(spec: { frontmatter: SkillFrontmatter; body: string 
 }
 
 export function defineTranscriber(spec: TranscriberDef): TranscriberDef {
+  return Object.freeze(spec);
+}
+
+export function defineCommand(spec: CommandDef): CommandDef {
+  return Object.freeze(spec);
+}
+
+export function defineAgent(spec: AgentDef): AgentDef {
   return Object.freeze(spec);
 }

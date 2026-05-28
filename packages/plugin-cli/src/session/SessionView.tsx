@@ -273,8 +273,9 @@ export const SessionView: React.FC<SessionViewProps> = ({
     if (!initialPrompt) return;
     firedInitial.current = true;
     void handleSubmit(initialPrompt);
-    // handleSubmit closes over the latest state via refs; safe to omit.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // handleSubmit closes over the latest state via refs; intentionally fired
+    // once per initialPrompt. (react-hooks/exhaustive-deps is not wired in the
+    // root lint config; re-add a disable directive here if it is.)
   }, [initialPrompt]);
 
   return (
@@ -290,6 +291,8 @@ export const SessionView: React.FC<SessionViewProps> = ({
         systemNotice={systemNotice}
         session={session}
         events={stream.events}
+        contextWindow={contextWindow}
+        contextTokens={contextUsed}
         onClose={() => setOverlay(null)}
       />
       <InteractiveZone

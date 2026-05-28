@@ -265,6 +265,10 @@ async function* runGitCommit(
     `git commit -F ${tmpPath}; rc=$?; rm -f ${tmpPath}; exit $rc`;
 
   const callId = asToolCallId(`developer-commit-${ctx.turnId}`);
+  // One input object for the emitted request, the permission check, AND the
+  // execution — otherwise a resolver/hook inspecting e.g. timeoutMs would be
+  // gated on a different shape than what actually runs.
+  const bashInput = { command, timeoutMs: 60_000 };
   yield await ctx.emit({
     type: 'tool_call_requested',
     sessionId: ctx.sessionId,
@@ -272,11 +276,11 @@ async function* runGitCommit(
     source: 'system',
     callId,
     name: 'Bash',
-    input: { command, timeoutMs: 60_000 },
+    input: bashInput,
   });
 
   const decision = await ctx.permissions.check(
-    { callId, name: 'Bash', input: { command } },
+    { callId, name: 'Bash', input: bashInput },
     { sessionId: String(ctx.sessionId), toolDescription: ctx.tools.get('Bash')?.description },
   );
   if (decision.mode === 'deny') {
@@ -311,7 +315,7 @@ async function* runGitCommit(
   });
 
   try {
-    const output = await ctx.tools.execute('Bash', { command, timeoutMs: 60_000 }, ctx.signal, {
+    const output = await ctx.tools.execute('Bash', bashInput, ctx.signal, {
       callId: String(callId),
       sessionId: String(ctx.sessionId),
       turnId: String(ctx.turnId),

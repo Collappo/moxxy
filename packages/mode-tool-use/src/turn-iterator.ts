@@ -2,15 +2,16 @@ import {
   asToolCallId,
   buildSystemPromptWithSkills,
   collectProviderStream,
-  projectMessagesFromLog,
+  dispatchToolCall,
+  projectMessages,
   runCompactionIfNeeded,
+  runElisionIfNeeded,
+  usageEventFields,
   type CollectedToolUse,
   type ModeContext,
   type MoxxyEvent,
-  type ProviderMessage,
+  type ProjectedMessages,
 } from '@moxxy/sdk';
-
-import { dispatchToolCall } from './tool-dispatch.js';
 import { createStuckLoopDetector } from './stuck-loop-detector.js';
 
 export const TOOL_USE_MODE_NAME = 'tool-use';
@@ -50,8 +51,12 @@ export async function* runToolUseMode(ctx: ModeContext): AsyncIterable<MoxxyEven
     // by buildMessages) honors it, so the model sees a summarized
     // prefix instead of overflowing the window mid-loop.
     await runCompactionIfNeeded(ctx);
+    // Turn-boundary elision (context-on-demand): stub old bulky tool output and
+    // (when enabled) old text turns, recall-able on demand. Composes with
+    // compaction over the same projection.
+    await runElisionIfNeeded(ctx);
 
-    const messages = buildMessages(ctx);
+    const { messages, stablePrefixIndex } = buildMessages(ctx);
     yield await ctx.emit({
       type: 'provider_request',
       sessionId: ctx.sessionId,
@@ -61,8 +66,9 @@ export async function* runToolUseMode(ctx: ModeContext): AsyncIterable<MoxxyEven
       model: ctx.model,
     });
 
-    const { text, toolUses, stopReason, error } = await collectProviderStream(ctx, messages, {
+    const { text, toolUses, stopReason, error, usage } = await collectProviderStream(ctx, messages, {
       iteration,
+      stablePrefixIndex,
     });
 
     yield await ctx.emit({
@@ -72,6 +78,7 @@ export async function* runToolUseMode(ctx: ModeContext): AsyncIterable<MoxxyEven
       source: 'system',
       provider: ctx.provider.name,
       model: ctx.model,
+      ...usageEventFields(usage),
     });
 
     if (error) {
@@ -206,11 +213,11 @@ async function* executeToolUses(
   return false;
 }
 
-function buildMessages(ctx: ModeContext): ReadonlyArray<ProviderMessage> {
+function buildMessages(ctx: ModeContext): ProjectedMessages {
   // Compose the system prompt with the skill catalog so the model knows
   // which playbooks exist; without this skills are invisible to the
   // model and it falls back to ad-hoc tool calls (the classic
   // `web_fetch instead of media-digest skill` symptom).
   const systemPrompt = buildSystemPromptWithSkills(ctx.systemPrompt, ctx.skills.list());
-  return projectMessagesFromLog(ctx, { ...(systemPrompt ? { systemPrompt } : {}) });
+  return projectMessages(ctx, { ...(systemPrompt ? { systemPrompt } : {}) });
 }

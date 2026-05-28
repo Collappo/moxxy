@@ -11,7 +11,7 @@
   "scripts": {
     "build": "turbo run build",
     "typecheck": "turbo run typecheck",
-    "lint": "turbo run lint",
+    "lint": "eslint .",
     "test": "turbo run test",
     "test:watch": "turbo run test:watch --concurrency=1",
     "check:deps": "depcruise --config .dependency-cruiser.cjs packages",

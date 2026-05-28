@@ -1,10 +1,12 @@
 import { promises as fs } from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { asSessionId, asTurnId, type ToolContext, type ToolDef } from '@moxxy/sdk';
 import { buildSelfUpdatePlugin, type SelfUpdateDeps, type SkipInfo } from './index.js';
 import { readJournal } from './transaction.js';
+import { writeCoreJournal } from './core-update.js';
 
 const tempDirs: string[] = [];
 afterEach(async () => {
@@ -201,5 +203,38 @@ describe('rollback', () => {
     await expect(fs.access(path.join(moxxy, 'plugins', 'temp'))).rejects.toBeTruthy();
     expect(host.tools.has('temp_tool')).toBe(false);
     expect((await readJournal(moxxy, begun.txnId)).state).toBe('rolled_back');
+  });
+
+  it('serializes core txns: begin refuses while another core txn is in flight', async () => {
+    const moxxy = await makeMoxxyDir();
+    // Fake a resolvable @moxxy/core install so begin gets past resolveCoreInstall
+    // and reaches the serialization guard (before any git clone).
+    const coreDir = path.join(moxxy, 'node_modules', '@moxxy', 'core');
+    await fs.mkdir(coreDir, { recursive: true });
+    await fs.writeFile(
+      path.join(coreDir, 'package.json'),
+      JSON.stringify({ version: '1.0.0', gitHead: 'abc123' }),
+      'utf8',
+    );
+    const fromUrl = pathToFileURL(path.join(moxxy, 'caller.js')).href;
+
+    // An active (provisioned = non-terminal) core txn already exists on disk.
+    await writeCoreJournal(moxxy, {
+      txnId: 'CTXN_ACTIVE',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      packages: ['@moxxy/core'],
+      version: '1.0.0',
+      gitHead: 'abc123',
+      repoDir: path.join(moxxy, 'self-update', 'repo'),
+      state: 'provisioned',
+      attempts: [],
+    });
+
+    const deps: SelfUpdateDeps = { ...new FakeHost(moxxy).deps(), coreUpdate: { fromUrl } };
+    const begin = tools(deps)['self_update_core_begin']!;
+    await expect(begin.handler({ packages: ['@moxxy/core'] }, makeCtx())).rejects.toThrow(
+      /already in progress/,
+    );
   });
 });

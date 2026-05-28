@@ -1,13 +1,15 @@
 import {
   asToolCallId,
   collectProviderStream,
+  dispatchToolCall,
   runCompactionIfNeeded,
+  runElisionIfNeeded,
+  usageEventFields,
   type ModeContext,
   type MoxxyEvent,
 } from '@moxxy/sdk';
 
 import { BMAD_MODE_NAME, type Artifacts } from '../constants.js';
-import { dispatchToolCall } from '../tool-dispatch.js';
 import {
   buildBmadContext,
   buildDevNudge,
@@ -64,6 +66,7 @@ export async function* runImplementationLoop(
     // context-heavy workflow we ship, so this is the mode that
     // benefits from auto-compaction the most.
     await runCompactionIfNeeded(ctx);
+    await runElisionIfNeeded(ctx);
 
     const messages = buildImplementationMessages(
       ctx,
@@ -80,7 +83,7 @@ export async function* runImplementationLoop(
       model: ctx.model,
     });
 
-    const { text, toolUses, stopReason, error } = await collectProviderStream(ctx, messages, {
+    const { text, toolUses, stopReason, error, usage } = await collectProviderStream(ctx, messages, {
       iteration,
     });
 
@@ -91,6 +94,7 @@ export async function* runImplementationLoop(
       source: 'system',
       provider: ctx.provider.name,
       model: ctx.model,
+      ...usageEventFields(usage),
     });
 
     if (error) {

@@ -109,6 +109,7 @@ export type {
   ProviderMessage,
   ProviderRequest,
   ProviderEvent,
+  CacheHint,
   TokenUsage,
   ModelDescriptor,
   LLMProvider,
@@ -120,6 +121,20 @@ export type {
   ProviderOAuthStatus,
   ProviderAuthDescriptor,
 } from './provider.js';
+export type { CacheStrategyDef, CacheStrategyContext } from './cache-strategy.js';
+export type {
+  ViewNode,
+  ViewAction,
+  ViewDoc,
+  ViewParseError,
+  ViewParseResult,
+  AttrType,
+  AttrSpec,
+  ViewTagSpec,
+  ViewRendererDef,
+} from './view-renderer.js';
+export { VIEW_PRIMITIVES, VIEW_COMPONENTS, DEFAULT_VIEW_TAGS } from './view-renderer.js';
+export type { TunnelProviderDef, TunnelHandle, TunnelOpenOptions } from './tunnel.js';
 export { isRetryableError, toFriendlyError, zodToJsonSchema, type StopReason } from './provider-utils.js';
 export {
   MoxxyError,
@@ -131,14 +146,49 @@ export {
 export {
   collectProviderStream,
   projectMessagesFromLog,
+  projectMessages,
   buildSystemPromptWithSkills,
   type CollectedToolUse,
   type StreamResult,
   type ProjectMessagesOptions,
+  type ProjectedMessages,
 } from './mode-helpers.js';
+export { dispatchToolCall } from './tool-dispatch.js';
 
 export type { TokenBudget, CompactContext, CompactorDef } from './compactor.js';
 export { estimateContextTokens, runCompactionIfNeeded } from './compactor-helpers.js';
+export {
+  runElisionIfNeeded,
+  resolveElisionSettings,
+  type ResolvedElisionSettings,
+} from './elision-helpers.js';
+export {
+  computeElisionState,
+  toolResultStub,
+  conversationalStub,
+  toolResultBytes,
+  toolResultStubbed,
+  conversationalStubbed,
+  TINY_TURN_CHARS,
+  type ElisionState,
+} from './elision-state.js';
+export {
+  applyLazyTools,
+  buildToolIndex,
+  loadedToolNames,
+  ALWAYS_ON_TOOLS,
+  type GatedTools,
+} from './tool-gating.js';
+
+export {
+  summarizeSessionTokens,
+  summarizeSessionTokensFromEvents,
+  summarizeTokensByModel,
+  addModelTotals,
+  usageEventFields,
+  type SessionTokenSummary,
+  type ModelUsageTotals,
+} from './token-accounting.js';
 
 export type { Skill, SkillDef, SkillFrontmatter, SkillScope, SkillSchedule } from './skill.js';
 
@@ -157,6 +207,7 @@ export type {
   PluginHostHandle,
   ModeContext,
   ModeDef,
+  ElisionSettings,
   ApprovalResolver,
   ApprovalRequest,
   ApprovalDecision,
@@ -223,10 +274,15 @@ export {
   defineProvider,
   defineMode,
   defineCompactor,
+  defineCacheStrategy,
+  defineViewRenderer,
+  defineTunnelProvider,
   defineChannel,
   definePermission,
   defineSkill,
   defineTranscriber,
+  defineCommand,
+  defineAgent,
 } from './define.js';
 
 export {

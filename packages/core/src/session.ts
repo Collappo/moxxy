@@ -15,6 +15,11 @@ import { HookDispatcherImpl } from './plugins/lifecycle.js';
 import { PluginHost, type PluginLoader } from './plugins/host.js';
 import { ProviderRegistry } from './registries/providers.js';
 import { ModeRegistry } from './registries/modes.js';
+import { CacheStrategyRegistry } from './registries/cache-strategies.js';
+import { ViewRendererRegistry } from './registries/view-renderers.js';
+import { defaultViewRenderer } from './view/default-renderer.js';
+import { TunnelProviderRegistry } from './registries/tunnel-providers.js';
+import { localhostTunnel } from './tunnel/localhost.js';
 import { CompactorRegistry } from './registries/compactors.js';
 import { ChannelRegistryImpl } from './registries/channels.js';
 import { SkillRegistryImpl } from './registries/skills.js';
@@ -27,6 +32,7 @@ import { PermissionEngine } from './permissions/engine.js';
 import { autoAllowResolver } from './permissions/resolvers.js';
 import type {
   ApprovalResolver,
+  ElisionSettings,
   PendingToolCall,
   PermissionContext,
   PermissionResolver,
@@ -74,6 +80,9 @@ export class Session implements ClientSession, SessionRuntime {
   readonly providers: ProviderRegistry;
   readonly modes: ModeRegistry;
   readonly compactors: CompactorRegistry;
+  readonly cacheStrategies: CacheStrategyRegistry;
+  readonly viewRenderers: ViewRendererRegistry;
+  readonly tunnelProviders: TunnelProviderRegistry;
   readonly channels: ChannelRegistryImpl;
   readonly skills: SkillRegistryImpl;
   readonly agents: AgentRegistry;
@@ -91,6 +100,14 @@ export class Session implements ClientSession, SessionRuntime {
    * approval step.
    */
   approvalResolver: ApprovalResolver | null = null;
+  /**
+   * Elision (context-on-demand) settings, resolved from `config.context.elision`
+   * at setup and updated on config reload. Null → built-in defaults apply
+   * (elision on). Read into each turn's ModeContext.
+   */
+  elisionSettings: ElisionSettings | null = null;
+  /** Lazy tool loading toggle, from `config.context.lazyTools`. Default off. */
+  lazyTools = false;
   readonly dispatcher: HookDispatcherImpl;
   readonly pluginHost: PluginHost;
   private readonly controller = new AbortController();
@@ -104,6 +121,15 @@ export class Session implements ClientSession, SessionRuntime {
     this.providers = new ProviderRegistry();
     this.modes = new ModeRegistry();
     this.compactors = new CompactorRegistry();
+    this.cacheStrategies = new CacheStrategyRegistry();
+    this.viewRenderers = new ViewRendererRegistry();
+    // Seed the built-in renderer so `present_view` always has one to parse
+    // with; plugins can register/replace and `setActive` an alternative.
+    this.viewRenderers.register(defaultViewRenderer);
+    this.tunnelProviders = new TunnelProviderRegistry();
+    // Seed the no-op localhost provider so the web surface always resolves a
+    // URL; plugins (cloudflared) register/setActive a real tunnel.
+    this.tunnelProviders.register(localhostTunnel);
     this.channels = new ChannelRegistryImpl();
     this.skills = new SkillRegistryImpl();
     this.agents = new AgentRegistry();
@@ -141,6 +167,9 @@ export class Session implements ClientSession, SessionRuntime {
       providers: this.providers,
       modes: this.modes,
       compactors: this.compactors,
+      cacheStrategies: this.cacheStrategies,
+      viewRenderers: this.viewRenderers,
+      tunnelProviders: this.tunnelProviders,
       channels: this.channels,
       agents: this.agents,
       commands: this.commands,

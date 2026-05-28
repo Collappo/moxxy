@@ -54,7 +54,7 @@ Most agent frameworks lock you in. One LLM provider. One loop topology. One fron
 
 |   |   |
 |---|---|
-| 🧩 **Truly modular** | Every block is a swappable plugin: provider, loop strategy, tools, compactor, channel. |
+| 🧩 **Truly modular** | Every block is a swappable plugin: provider, loop strategy, tools, compactor, cache strategy, channel. |
 | 🔌 **Plug-and-play** | Install a package, it's auto-discovered. Hot-reload without restarting. |
 | 🤖 **Multi-channel** | TUI, Telegram, HTTP. One Session, many surfaces. |
 | 🎙 **Voice in** | Send Telegram voice notes or POST raw audio to the HTTP channel. Whisper plugin ships with the framework; swap to Deepgram or local whisper.cpp by registering a different `Transcriber`. |
@@ -133,6 +133,7 @@ Logs land in `~/.moxxy/services/<name>.log`; units survive reboots.
 - **Providers**: Anthropic, OpenAI, Codex (ChatGPT OAuth). Add your own with one `defineProvider({})`.
 - **Loop strategies**: `tool-use` (default, Claude-Code-style), `plan-execute` (plan → validate → execute), `bmad` (analysis → planning → solutioning → implementation), `developer` (guardrailed tool-use → verify → commit-with-diff-preview gate), `deep-research` (plan queries → parallel subagent fan-out → cited synthesis).
 - **Built-in tools**: Read, Edit, Write, Bash, Grep, Glob, WebFetch, plus computer-control (macOS) and browser-session (Playwright).
+- **Prompt caching**: `@moxxy/cache-strategy-stable-prefix` places deterministic cache breakpoints (static tools/system/stable-prefix + a rolling tail) so the inner iterations of a turn read the prompt from cache instead of paying full price. A `CacheStrategy` is provider-neutral (Anthropic `cache_control` today); swap it or disable caching with the `none` strategy. Inspect savings live with `/usage`.
 - **MCP**: register any Model Context Protocol server as a tool source.
 - **Skills**: prompt-only Markdown files. The agent can author new skills for itself when no existing skill fits.
 - **Memory**: long-term journal + STM event-log selectors. TF-IDF vector recall built in; swap to OpenAI embeddings via `@moxxy/plugin-embeddings-openai`.
@@ -157,12 +158,12 @@ Everything below is for plugin authors, contributors, and folks embedding moxxy 
 import { Session, runTurn, autoAllowResolver } from '@moxxy/core';
 import { anthropicPlugin } from '@moxxy/plugin-provider-anthropic';
 import { builtinToolsPlugin } from '@moxxy/tools-builtin';
-import { toolUseLoopPlugin } from '@moxxy/loop-tool-use';
+import { toolUseModePlugin } from '@moxxy/mode-tool-use';
 
 const session = new Session({ cwd: process.cwd(), permissionResolver: autoAllowResolver });
 session.pluginHost.registerStatic(anthropicPlugin);
 session.pluginHost.registerStatic(builtinToolsPlugin);
-session.pluginHost.registerStatic(toolUseLoopPlugin);
+session.pluginHost.registerStatic(toolUseModePlugin);
 session.providers.setActive('anthropic');
 
 for await (const event of runTurn(session, 'list TS files in cwd')) {
@@ -196,7 +197,7 @@ Add a `"moxxy"` block to your `package.json` and moxxy auto-discovers it:
 }
 ```
 
-Per-block author guides live in [`.claude/agents/`](.claude/agents/), one per surface (skill, plugin, tool, channel, provider, loop strategy, compactor).
+Per-block author guides live in [`.claude/agents/`](.claude/agents/), one per surface (skill, plugin, tool, channel, provider, loop strategy, compactor, cache strategy).
 
 ## Configuration
 
@@ -213,7 +214,7 @@ export default defineConfig({
   },
   loop: 'tool-use',
   plugins: {
-    '@moxxy/loop-plan-execute': { enabled: false },     // disable per-plugin
+    '@moxxy/mode-plan-execute': { enabled: false },     // disable per-plugin
   },
 });
 ```
@@ -226,17 +227,22 @@ export default defineConfig({
 @moxxy/sdk                          ← typed public surface (zero runtime deps)
 @moxxy/core                         ← runtime: event log, registries, plugin host, permissions, skills
 @moxxy/tools-builtin                ← Read / Edit / Write / Bash / Grep / Glob
-@moxxy/loop-tool-use                ← default loop strategy
-@moxxy/loop-plan-execute            ← plan-then-execute strategy
-@moxxy/loop-bmad                    ← BMAD multi-persona loop
+@moxxy/mode-tool-use                ← default loop strategy (Claude Code-style)
+@moxxy/mode-plan-execute            ← plan-then-execute strategy
+@moxxy/mode-developer               ← implement → verify → commit strategy
+@moxxy/mode-bmad                    ← BMAD multi-persona strategy
+@moxxy/mode-deep-research           ← multi-query research + synthesis strategy
 @moxxy/plugin-provider-anthropic    ← LLM provider
 @moxxy/plugin-provider-openai       ← LLM provider
 @moxxy/plugin-provider-openai-codex ← ChatGPT OAuth provider
+@moxxy/plugin-provider-admin        ← register OpenAI-compatible providers at runtime
 @moxxy/plugin-mcp                   ← MCP servers as tool sources
 @moxxy/plugin-vault                 ← encrypted secrets
 @moxxy/plugin-memory                ← journal LTM + vector recall + STM selectors
 @moxxy/plugin-embeddings-openai     ← neural embeddings (optional)
+@moxxy/plugin-embeddings-transformers ← on-device embeddings via transformers.js
 @moxxy/plugin-stt-whisper           ← OpenAI Whisper Transcriber (voice in)
+@moxxy/plugin-stt-whisper-codex     ← Whisper Transcriber via the ChatGPT OAuth creds
 @moxxy/plugin-browser               ← headless Playwright sidecar + web_fetch
 @moxxy/plugin-computer-control      ← macOS native input (screenshot, click, type, …)
 @moxxy/plugin-oauth                 ← generic OAuth 2.0 + PKCE / device-code
@@ -250,7 +256,13 @@ export default defineConfig({
 @moxxy/isolator-subprocess          ← subprocess Isolator (kernel-enforced process boundary)
 @moxxy/isolator-wasm                ← WebAssembly Isolator (zero ambient authority; experimental)
 @moxxy/plugin-subagents             ← spawn sub-agents from a turn
+@moxxy/plugin-commands              ← built-in slash commands (/info, /clear, /compact, …)
+@moxxy/plugin-self-update           ← agent edits its own plugins/skills (Tier 1) + core (Tier 2)
+@moxxy/plugin-plugins-admin         ← install / list / remove @moxxy plugins at runtime
+@moxxy/plugin-usage-stats           ← per-session token + cost accounting
 @moxxy/compactor-summarize          ← default context-window compactor
+@moxxy/cache-strategy-stable-prefix ← default prompt-cache strategy (deterministic breakpoints; `none` opts out)
+@moxxy/runner                       ← bare session runner; channels attach over a unix socket (JSON-RPC)
 @moxxy/cli                          ← the `moxxy` binary
 @moxxy/config                       ← defineConfig + moxxy.config.ts loader
 @moxxy/testing                      ← FakeProvider + record/replay harness
@@ -264,7 +276,7 @@ The hard invariant: `@moxxy/sdk` has zero internal deps; `@moxxy/core` doesn't i
 packages/        publishable @moxxy/* packages
 apps/            runnable examples (example-basic, example-cli, fixture-recorder, docs)
 tooling/         shared tsconfig + eslint + vitest preset
-.claude/agents/  AI-agent author guides (skill, plugin, tool, channel, provider, …)
+.claude/agents/  AI-agent author guides (skill, plugin, tool, channel, provider, compactor, cache strategy, …)
 AGENTS.md        index for AI agents working in this repo
 ```
 
@@ -282,7 +294,7 @@ CI runs all of the above on every push + PR.
 
 ## 🤝 Contributing
 
-PRs welcome. Open an issue first for anything non-trivial. Per-block author guides in [`.claude/agents/`](.claude/agents/) describe how to write skills, plugins, tools, channels, providers, loop strategies, and compactors.
+PRs welcome. Open an issue first for anything non-trivial. Per-block author guides in [`.claude/agents/`](.claude/agents/) describe how to write skills, plugins, tools, channels, providers, loop strategies, compactors, and cache strategies.
 
 ## 📝 License
 

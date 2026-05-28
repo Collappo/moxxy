@@ -2,13 +2,15 @@ import {
   asToolCallId,
   buildSystemPromptWithSkills,
   collectProviderStream,
-  projectMessagesFromLog,
+  dispatchToolCall,
+  projectMessages,
   runCompactionIfNeeded,
+  runElisionIfNeeded,
+  usageEventFields,
   type ModeContext,
 } from '@moxxy/sdk';
 
 import { PLAN_EXECUTE_MODE_NAME, PLAN_PLUGIN_ID } from './constants.js';
-import { dispatchToolCall } from './tool-dispatch.js';
 
 /**
  * Execute one plan step as a small tool-use sub-loop. Returns `true` when
@@ -55,8 +57,9 @@ export async function executeStep(
     // phase can't blow the context window without warning. See
     // runCompactionIfNeeded() for the no-op fallbacks.
     await runCompactionIfNeeded(ctx);
+    await runElisionIfNeeded(ctx);
 
-    const messages = projectMessagesFromLog(ctx, {
+    const { messages, stablePrefixIndex } = projectMessages(ctx, {
       systemPrompt:
         buildSystemPromptWithSkills(ctx.systemPrompt, ctx.skills.list()) ?? ctx.systemPrompt,
       trailingUserText: stepNudge,
@@ -70,8 +73,9 @@ export async function executeStep(
       model: ctx.model,
     });
 
-    const { text, toolUses, stopReason } = await collectProviderStream(ctx, messages, {
+    const { text, toolUses, stopReason, error, usage } = await collectProviderStream(ctx, messages, {
       iteration,
+      stablePrefixIndex,
     });
 
     await ctx.emit({
@@ -81,7 +85,25 @@ export async function executeStep(
       source: 'system',
       provider: ctx.provider.name,
       model: ctx.model,
+      ...usageEventFields(usage),
     });
+
+    // A provider failure yields zero tool uses — without this guard the
+    // `toolUses.length === 0` check below would mistake a failed call for a
+    // completed step (return true). Surface it and retry if retryable;
+    // otherwise end the step as NOT done.
+    if (error) {
+      await ctx.emit({
+        type: 'error',
+        sessionId: ctx.sessionId,
+        turnId: ctx.turnId,
+        source: 'system',
+        kind: error.retryable ? 'retryable' : 'fatal',
+        message: error.message,
+      });
+      if (!error.retryable) return false;
+      continue;
+    }
 
     // Surface any spoken text from the model. Note: we do NOT emit
     // tool_call_requested here yet — emitting before we know we'll
@@ -147,7 +169,10 @@ export async function executeStep(
         input: t.input,
       });
 
-      await dispatchToolCall(ctx, t, iteration);
+      // Drain the dispatch generator: its events reach the log via ctx.emit
+      // (run-turn surfaces from the log, not the mode's yields), so this phase
+      // doesn't need to re-yield them.
+      for await (const _ of dispatchToolCall(ctx, t, iteration)) void _;
     }
   }
   return false;

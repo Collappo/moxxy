@@ -15,6 +15,7 @@ import { bmadModePlugin } from '@moxxy/mode-bmad';
 import { developerModePlugin } from '@moxxy/mode-developer';
 import { deepResearchModePlugin } from '@moxxy/mode-deep-research';
 import { summarizeCompactorPlugin } from '@moxxy/compactor-summarize';
+import { stablePrefixCacheStrategyPlugin } from '@moxxy/cache-strategy-stable-prefix';
 import {
   buildMemoryConsolidatePlugin,
   type MemoryStore,
@@ -23,12 +24,15 @@ import { buildTelegramPlugin } from '@moxxy/plugin-telegram';
 import { buildMcpAdminPluginWithApi, type McpAdminApi } from '@moxxy/plugin-mcp';
 import { cliPlugin } from '@moxxy/plugin-cli';
 import { httpChannelPlugin } from '@moxxy/plugin-channel-http';
+import { buildWebChannelPlugin } from '@moxxy/plugin-channel-web';
 import { browserPlugin } from '@moxxy/plugin-browser';
 import { buildSubagentsPlugin } from '@moxxy/plugin-subagents';
 import { buildPluginsAdminPlugin } from '@moxxy/plugin-plugins-admin';
 import { buildSelfUpdatePlugin } from '@moxxy/plugin-self-update';
 import { buildProviderAdminPlugin } from '@moxxy/plugin-provider-admin';
+import { buildUsageStatsPlugin } from '@moxxy/plugin-usage-stats';
 import { commandsPlugin } from '@moxxy/plugin-commands';
+import { buildViewPlugin } from '@moxxy/plugin-view';
 import { computerControlPlugin } from '@moxxy/plugin-computer-control';
 import { buildOauthPlugin } from '@moxxy/plugin-oauth';
 import type { VaultStore } from '@moxxy/plugin-vault';
@@ -75,6 +79,7 @@ export const BUILTIN_REQUIREMENT_DECISIONS: Readonly<Record<string, BuiltinRequi
   '@moxxy/mode-developer': { hardRequirements: false, reason: 'mode layers on tool-use; no hard plugin dependency' },
   '@moxxy/mode-deep-research': { hardRequirements: false, reason: 'mode needs @moxxy/plugin-subagents at runtime; surfaced as fatal error if absent' },
   '@moxxy/compactor-summarize': { hardRequirements: false, reason: 'compactor has no plugin dependency' },
+  '@moxxy/cache-strategy-stable-prefix': { hardRequirements: false, reason: 'cache strategy has no plugin dependency' },
   '@moxxy/plugin-vault': { hardRequirements: false, reason: 'vault is the base secret store' },
   '@moxxy/plugin-stt-whisper': { hardRequirements: false, reason: 'generic Whisper backend; harmless without a configured provider' },
   '@moxxy/plugin-stt-whisper-codex': { hardRequirements: true, reason: 'requires Codex provider and OAuth readiness' },
@@ -82,11 +87,13 @@ export const BUILTIN_REQUIREMENT_DECISIONS: Readonly<Record<string, BuiltinRequi
   '@moxxy/memory-consolidate': { hardRequirements: true, reason: 'requires @moxxy/plugin-memory contributions' },
   '@moxxy/plugin-cli': { hardRequirements: false, reason: 'TUI channel is standalone' },
   '@moxxy/plugin-channel-http': { hardRequirements: false, reason: 'HTTP channel is standalone' },
+  '@moxxy/plugin-channel-web': { hardRequirements: false, reason: 'web surface is standalone; token auto-generated' },
   '@moxxy/plugin-telegram': { hardRequirements: false, reason: 'vault is injected by bootstrap closure' },
   '@moxxy/plugin-browser': { hardRequirements: false, reason: 'browser runtime is diagnosed at tool/runtime level' },
   '@moxxy/plugin-computer-control': { hardRequirements: false, reason: 'platform constraints are handled by tools' },
   '@moxxy/plugin-oauth': { hardRequirements: false, reason: 'vault is injected by bootstrap closure' },
   '@moxxy/plugin-commands': { hardRequirements: false, reason: 'slash commands have no plugin dependency' },
+  '@moxxy/plugin-view': { hardRequirements: false, reason: 'view renderer is seeded by core; the tool defers to the active renderer via closure' },
   '@moxxy/plugin-subagents': { hardRequirements: false, reason: 'agent registry is injected by closure' },
   '@moxxy/plugin-plugins-admin': { hardRequirements: false, reason: 'plugin host access is injected by closure' },
   '@moxxy/plugin-self-update': { hardRequirements: false, reason: 'plugin host / log access is injected by closure' },
@@ -96,6 +103,7 @@ export const BUILTIN_REQUIREMENT_DECISIONS: Readonly<Record<string, BuiltinRequi
   '@moxxy/plugin-webhooks': { hardRequirements: false, reason: 'runner is injected by closure' },
   '@moxxy/plugin-security': { hardRequirements: false, reason: 'disabled by default and configured at runtime' },
   '@moxxy/plugin-config': { hardRequirements: false, reason: 'config applier is injected by bootstrap closure' },
+  '@moxxy/plugin-usage-stats': { hardRequirements: false, reason: 'records usage via lifecycle hooks; no plugin dependency' },
 };
 
 export interface BuildBuiltinsArgs {
@@ -130,6 +138,14 @@ export interface BuiltBuiltinsCore {
 export function buildBuiltinsCore(args: BuildBuiltinsArgs): BuiltBuiltinsCore {
   const { session, rawConfig, vault, vaultPlugin, memory, memoryPlugin, schedulerRunner, webhookRunner, logger } = args;
 
+  // Shared handle linking the web surface to present_view: the web channel
+  // publishes its live URL + view-id minter here on start; the view tool reads
+  // it so it can return the public URL for the agent to relay on any channel.
+  const viewSurface: { current: { url: string; nextViewId: () => string } | null } = { current: null };
+  // Live web-surface controls (set when the surface starts) so the web_set_tunnel
+  // tool can switch the tunnel without a restart.
+  const webControls: { current: { retunnel(): Promise<string | null> } | null } = { current: null };
+
   const entries: BuiltinEntry[] = [
     { name: '@moxxy/plugin-provider-anthropic', plugin: anthropicPlugin },
     { name: '@moxxy/plugin-provider-openai', plugin: openaiPlugin },
@@ -141,6 +157,7 @@ export function buildBuiltinsCore(args: BuildBuiltinsArgs): BuiltBuiltinsCore {
     { name: '@moxxy/mode-developer', plugin: developerModePlugin },
     { name: '@moxxy/mode-deep-research', plugin: deepResearchModePlugin },
     { name: '@moxxy/compactor-summarize', plugin: summarizeCompactorPlugin },
+    { name: '@moxxy/cache-strategy-stable-prefix', plugin: stablePrefixCacheStrategyPlugin },
     { name: '@moxxy/plugin-vault', plugin: vaultPlugin },
     { name: '@moxxy/plugin-stt-whisper', plugin: buildWhisperPlugin() },
     {
@@ -153,7 +170,36 @@ export function buildBuiltinsCore(args: BuildBuiltinsArgs): BuiltBuiltinsCore {
       plugin: buildMemoryConsolidatePlugin(memory, () => session.providers.getActive()),
     },
     { name: '@moxxy/plugin-cli', plugin: cliPlugin },
+    // Cross-session token usage. onShutdown folds this run's provider_response
+    // usage by provider/model into ~/.moxxy/usage.json (a forward-going
+    // aggregate). Surfaced in the /usage panel; reset via /usage clear.
+    { name: '@moxxy/plugin-usage-stats', plugin: buildUsageStatsPlugin() },
     { name: '@moxxy/plugin-channel-http', plugin: httpChannelPlugin },
+    {
+      name: '@moxxy/plugin-channel-web',
+      plugin: buildWebChannelPlugin({
+        getTunnel: () => session.tunnelProviders.getActive(),
+        publishSurface: (s) => {
+          viewSurface.current = s;
+        },
+        publishControls: (c) => {
+          webControls.current = c;
+        },
+        getControls: () => webControls.current,
+        tunnels: {
+          list: () => session.tunnelProviders.list().map((p) => p.name),
+          active: () => session.tunnelProviders.getActive()?.name ?? null,
+          setActive: (n) => session.tunnelProviders.setActive(n),
+          isAvailable: async (n) => {
+            const p = session.tunnelProviders.list().find((x) => x.name === n);
+            return p?.isAvailable ? p.isAvailable() : true;
+          },
+        },
+        ...(typeof (rawConfig.channels as { web?: { tunnel?: unknown } } | undefined)?.web?.tunnel === 'string'
+          ? { defaultTunnel: (rawConfig.channels as { web?: { tunnel?: string } }).web!.tunnel }
+          : {}),
+      }),
+    },
     { name: '@moxxy/plugin-telegram', plugin: buildTelegramPlugin({ vault }) },
     { name: '@moxxy/plugin-browser', plugin: browserPlugin },
     // macOS-only computer control: screenshot, click, type, key,
@@ -169,6 +215,17 @@ export function buildBuiltinsCore(args: BuildBuiltinsArgs): BuiltBuiltinsCore {
     // shared across every channel via session.commands. Disable to
     // hide them everywhere — channel-local commands keep working.
     { name: '@moxxy/plugin-commands', plugin: commandsPlugin },
+    // Agent-authored UIs: present_view parses the model's JSX-like view-spec
+    // (via the session's active, swappable view renderer) into a validated AST
+    // that the web surface renders as interactive UI. The renderer is reached
+    // through a closure since ToolContext exposes no session handle.
+    {
+      name: '@moxxy/plugin-view',
+      plugin: buildViewPlugin({
+        getRenderer: () => session.viewRenderers.getActive(),
+        getSurface: () => viewSurface.current,
+      }),
+    },
     // Subagents are a swappable block: this plugin owns the
     // dispatch_agent tool and the auto-detection skill. Drop it
     // (`config.plugins['@moxxy/plugin-subagents'].enabled = false`) and

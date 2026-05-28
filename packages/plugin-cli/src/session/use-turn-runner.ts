@@ -88,13 +88,14 @@ export function useTurnRunner(opts: TurnRunnerOptions): TurnRunnerHandle {
       //   2. Remaining queue concatenates into one follow-up turn — the
       //      model sees accumulated input as one coherent prompt rather
       //      than N micro-turns.
+      // else-if rather than an early `return` inside finally (a return in
+      // finally is unsafe — it would swallow the try/catch outcome). The else
+      // gives the same "priority runs alone, otherwise drain the queue".
       if (priorityMessage) {
         const p = priorityMessage;
         setPriorityMessage(null);
         await runTurnWith(p.text, p.attachments);
-        return;
-      }
-      if (queueRef.current.length > 0) {
+      } else if (queueRef.current.length > 0) {
         const batch = queueRef.current.splice(0);
         setQueueCount(0);
         const joinedText = batch.map((b) => b.text).join('\n\n');

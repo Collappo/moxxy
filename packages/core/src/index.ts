@@ -6,6 +6,14 @@ export {
   preferencesPath,
   type MoxxyPreferences,
 } from './preferences.js';
+export {
+  loadUsageStats,
+  mergeUsageStats,
+  clearUsageStats,
+  usageStatsPath,
+  type UsageStatsFile,
+  type StoredModelUsage,
+} from './usage-stats.js';
 export { SkillRegistryImpl } from './registries/skills.js';
 export {
   parseSkillFile,
@@ -26,7 +34,6 @@ export {
 } from './skills/index.js';
 export { EventLog, type EventListener } from './events/log.js';
 export {
-  selectMessages,
   selectPendingToolCalls,
   selectCurrentTurn,
   type PendingToolCall,
@@ -38,6 +45,12 @@ export { ToolRegistryImpl, type ToolRegistry } from './registries/tools.js';
 export { ProviderRegistry } from './registries/providers.js';
 export { ModeRegistry } from './registries/modes.js';
 export { CompactorRegistry } from './registries/compactors.js';
+export { CacheStrategyRegistry } from './registries/cache-strategies.js';
+export { ViewRendererRegistry } from './registries/view-renderers.js';
+export { defaultViewRenderer } from './view/default-renderer.js';
+export { parseView, validateDoc, countNodes } from './view/parse.js';
+export { TunnelProviderRegistry } from './registries/tunnel-providers.js';
+export { localhostTunnel } from './tunnel/localhost.js';
 export { ChannelRegistryImpl } from './registries/channels.js';
 export { AgentRegistry } from './registries/agents.js';
 export { CommandRegistry } from './registries/commands.js';

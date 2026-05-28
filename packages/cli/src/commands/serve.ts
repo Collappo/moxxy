@@ -1,6 +1,7 @@
 import type { Channel, ChannelDef, ChannelHandle } from '@moxxy/sdk';
 import { startRunnerServer, runnerSocketPath, type RunnerServer } from '@moxxy/runner';
 import type { ParsedArgv } from '../argv.js';
+import { coAttachWebSurface } from './web-surface.js';
 import { bootSessionWithConfig, hasBoolFlag, helpRequested, stringFlag } from '../argv-helpers.js';
 import { colors } from '../colors.js';
 import { formatHelp } from './help-format.js';
@@ -281,7 +282,15 @@ async function runServeForeground(
       }
     }
   }
-  void vault;
+  // Co-attach the web view surface to the runner's session (on by default) so
+  // any attached client (incl. the TUI) can drive "build me X" and present_view
+  // renders. Skip if `--all` already started the web channel. Local by default;
+  // a public tunnel is opt-in via the persisted setting / config.
+  if (!started.some((s) => s.name === 'web')) {
+    const webHandle = await coAttachWebSurface({ primary: 'serve', session, vault, config });
+    if (webHandle) started.push({ name: 'web', handle: webHandle });
+  }
+
   void config;
 
   const runningBackground = BACKGROUND_UNITS.filter((u) => !except.has(u.id)).map((u) => u.id);
@@ -429,6 +438,11 @@ async function runUntilSignal(
   const shutdown = async (signal: string): Promise<void> => {
     if (stopRequested) return;
     stopRequested = true;
+    // Guarantee the process exits even if a stop()/close() hangs — otherwise it
+    // lingers holding the port. The child-cleanup `exit` hook then SIGKILLs any
+    // tunnel subprocess, so nothing is left running.
+    const force = setTimeout(() => process.exit(0), 4000);
+    force.unref?.();
     process.stderr.write(`\nstopping (${signal})…\n`);
     // Close the socket first so attached clients see the disconnect and stop
     // sending before the session tears down.

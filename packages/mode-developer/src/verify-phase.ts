@@ -2,14 +2,16 @@ import {
   asToolCallId,
   buildSystemPromptWithSkills,
   collectProviderStream,
-  projectMessagesFromLog,
+  dispatchToolCall,
+  projectMessages,
   runCompactionIfNeeded,
+  runElisionIfNeeded,
+  usageEventFields,
   type ModeContext,
   type MoxxyEvent,
 } from '@moxxy/sdk';
 
 import { DEVELOPER_MODE_NAME, VERIFY_MAX_ITERATIONS, VERIFY_SYSTEM_PROMPT } from './constants.js';
-import { dispatchToolCall } from './tool-dispatch.js';
 
 /**
  * Window + threshold for the verify-phase stuck-loop detector. Verify
@@ -54,13 +56,14 @@ export async function* runVerifyPhase(
     });
 
     await runCompactionIfNeeded(ctx);
+    await runElisionIfNeeded(ctx);
 
     const baseSystem =
       buildSystemPromptWithSkills(ctx.systemPrompt, ctx.skills.list()) ?? ctx.systemPrompt ?? '';
     const systemPrompt = baseSystem
       ? `${VERIFY_SYSTEM_PROMPT}\n\n${baseSystem}`
       : VERIFY_SYSTEM_PROMPT;
-    const messages = projectMessagesFromLog(ctx, {
+    const { messages, stablePrefixIndex } = projectMessages(ctx, {
       systemPrompt,
       trailingUserText:
         'The implementation phase is done. Now run the verify command(s) and reply with the SUMMARY: / COMMIT: blocks exactly as specified.',
@@ -75,8 +78,9 @@ export async function* runVerifyPhase(
       model: ctx.model,
     });
 
-    const { text, toolUses, stopReason, error } = await collectProviderStream(ctx, messages, {
+    const { text, toolUses, stopReason, error, usage } = await collectProviderStream(ctx, messages, {
       iteration,
+      stablePrefixIndex,
     });
 
     await ctx.emit({
@@ -86,6 +90,7 @@ export async function* runVerifyPhase(
       source: 'system',
       provider: ctx.provider.name,
       model: ctx.model,
+      ...usageEventFields(usage),
     });
 
     if (error) {
@@ -152,7 +157,8 @@ export async function* runVerifyPhase(
         name: t.name,
         input: t.input,
       });
-      await dispatchToolCall(ctx, t, iteration);
+      // Drain the dispatch generator — its events reach the log via ctx.emit.
+      for await (const _ of dispatchToolCall(ctx, t, iteration)) void _;
     }
   }
 

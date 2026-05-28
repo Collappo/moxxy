@@ -97,7 +97,24 @@ export interface PluginRegisteredEvent extends EventBase {
   readonly pluginId: PluginId;
   readonly name: string;
   readonly version: string;
-  readonly kind: ReadonlyArray<'tools' | 'provider' | 'mode' | 'compactor' | 'mcp' | 'cli' | 'hooks'>;
+  // Keep in sync with PluginKind (plugin.ts). Inlined rather than imported to
+  // avoid an events↔plugin type cycle (dep-cruiser flags circular deps).
+  readonly kind: ReadonlyArray<
+    | 'tools'
+    | 'provider'
+    | 'mode'
+    | 'compactor'
+    | 'cache-strategy'
+    | 'view-renderer'
+    | 'tunnel-provider'
+    | 'mcp'
+    | 'cli'
+    | 'channel'
+    | 'hooks'
+    | 'agent'
+    | 'command'
+    | 'transcriber'
+  >;
 }
 
 export interface PluginUnregisteredEvent extends EventBase {
@@ -117,8 +134,51 @@ export interface ModeIterationEvent extends EventBase {
 export interface CompactionEvent extends EventBase {
   readonly type: 'compaction';
   readonly compactor: string;
+  /**
+   * Inclusive `[fromSeq, toSeq]` range of event `seq` values this summary
+   * replaces — NOT array indices. Consumers (`projectMessagesFromLog`,
+   * `estimateContextTokens`) test `event.seq` against these bounds, so a
+   * compactor MUST emit the `seq` of the first/last replaced event. (Today
+   * `seq === arrayIndex` in the primary log, but that is not guaranteed for
+   * mirrors or partial views — emit seqs to stay correct regardless.)
+   */
   readonly replacedRange: readonly [number, number];
   readonly summary: string;
+  readonly tokensSaved: number;
+}
+
+/**
+ * Records a turn-boundary elision step (context-on-demand). Events at or below
+ * `elidedThrough` (and not covered by a compaction) are projected as compact
+ * stubs the model can expand with the `recall` tool. The high-water mark only
+ * advances on whole-turn boundaries, so the elided prefix stays byte-stable
+ * across the inner iterations of a turn — which is what lets prompt caching
+ * keep hitting.
+ */
+export interface ElisionEvent extends EventBase {
+  readonly type: 'elision';
+  /** Inclusive seq high-water mark: events with `seq <= elidedThrough` are stubbed. */
+  readonly elidedThrough: number;
+  /** Turn-aligned [from,to] seq ranges newly stubbed by this step (informational). */
+  readonly stubbedRanges: ReadonlyArray<readonly [number, number]>;
+  /**
+   * Whether old user/assistant text turns (not just bulky tool results) are
+   * collapsed to stubs. Carried on the event so `projectMessagesFromLog` stays
+   * a pure function of the log (no need to thread config through projection).
+   * Note: even when true, conversational elision auto-disables for the session
+   * once seq-based `recall` calls reach `conversationalRecallThreshold`.
+   */
+  readonly elideConversational: boolean;
+  /**
+   * Adaptive safety: after this many `recall({ seq })` calls (the form used to
+   * recall elided TEXT turns), conversational elision turns off for the rest of
+   * the session. Carried on the event so projection decides it from the log.
+   */
+  readonly conversationalRecallThreshold: number;
+  /** Cap on total bytes of recalled content pinned verbatim below the HWM. */
+  readonly maxRecallBytes: number;
+  /** Tool names whose results are never stubbed (kept verbatim regardless of age). */
+  readonly neverElideTools: ReadonlyArray<string>;
   readonly tokensSaved: number;
 }
 
@@ -173,6 +233,7 @@ export type MoxxyEvent =
   | PluginUnregisteredEvent
   | ModeIterationEvent
   | CompactionEvent
+  | ElisionEvent
   | ProviderRequestEvent
   | ProviderResponseEvent
   | ErrorEvent

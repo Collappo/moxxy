@@ -118,6 +118,15 @@ describe('bashTool', () => {
     const result = await p;
     expect(result).toMatch(/exit/);
   });
+
+  it('rejects immediately when the signal is already aborted (does not spawn)', async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const ctx = { ...baseCtx(), signal: controller.signal };
+    await expect(
+      bashTool.handler({ command: 'echo should-not-run', timeoutMs: 5000 }, ctx),
+    ).rejects.toThrow(/aborted before start/);
+  });
 });
 
 describe('grepTool', () => {
@@ -133,6 +142,30 @@ describe('grepTool', () => {
     await fs.writeFile(path.join(tmp, 'a.txt'), 'HELLO');
     const out = (await grepTool.handler({ pattern: 'hello', caseInsensitive: true }, baseCtx())) as string;
     expect(out).toContain('a.txt:1');
+  });
+
+  it('surfaces an invalid regex as a clean error, not a raw SyntaxError', async () => {
+    await expect(grepTool.handler({ pattern: '(' }, baseCtx())).rejects.toThrow(
+      /invalid regular expression/i,
+    );
+  });
+});
+
+describe('globTool symlinks', () => {
+  it('does not emit a directory symlink as a file match, but still matches a file symlink', async () => {
+    await fs.mkdir(path.join(tmp, 'target'));
+    await fs.symlink(path.join(tmp, 'target'), path.join(tmp, 'dlink'), 'dir');
+    // A dir-symlink is a directory, not a file — globbing its name as a file
+    // must not match it (the old code emitted it because `isSymbolicLink`
+    // triggered the file branch too).
+    const dirOut = (await globTool.handler({ pattern: 'dlink' }, baseCtx())) as string;
+    expect(dirOut).not.toContain('dlink');
+
+    // A file-symlink must still match as a file (no regression).
+    await fs.writeFile(path.join(tmp, 'real.txt'), 'x');
+    await fs.symlink(path.join(tmp, 'real.txt'), path.join(tmp, 'flink.txt'), 'file');
+    const fileOut = (await globTool.handler({ pattern: 'flink.txt' }, baseCtx())) as string;
+    expect(fileOut).toContain('flink.txt');
   });
 });
 

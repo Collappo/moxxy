@@ -1,5 +1,6 @@
 import type {
   AgentDef,
+  CacheStrategyDef,
   ChannelDef,
   CommandDef,
   CompactorDef,
@@ -13,11 +14,16 @@ import type {
   ResolvedPluginManifest,
   ToolDef,
   TranscriberDef,
+  ViewRendererDef,
+  TunnelProviderDef,
 } from '@moxxy/sdk';
 import type { Logger } from '../logger.js';
 import type { AgentRegistry } from '../registries/agents.js';
 import type { CommandRegistry } from '../registries/commands.js';
 import type { ChannelRegistryImpl } from '../registries/channels.js';
+import type { CacheStrategyRegistry } from '../registries/cache-strategies.js';
+import type { ViewRendererRegistry } from '../registries/view-renderers.js';
+import type { TunnelProviderRegistry } from '../registries/tunnel-providers.js';
 import type { CompactorRegistry } from '../registries/compactors.js';
 import type { ModeRegistry } from '../registries/modes.js';
 import type { ProviderRegistry } from '../registries/providers.js';
@@ -35,6 +41,9 @@ export interface PluginHostOptions {
   readonly providers: ProviderRegistry;
   readonly modes: ModeRegistry;
   readonly compactors: CompactorRegistry;
+  readonly cacheStrategies: CacheStrategyRegistry;
+  readonly viewRenderers: ViewRendererRegistry;
+  readonly tunnelProviders: TunnelProviderRegistry;
   readonly channels: ChannelRegistryImpl;
   readonly agents: AgentRegistry;
   readonly commands: CommandRegistry;
@@ -100,6 +109,9 @@ interface LoadedRecord {
   readonly providerNames: ReadonlyArray<string>;
   readonly modeNames: ReadonlyArray<string>;
   readonly compactorNames: ReadonlyArray<string>;
+  readonly cacheStrategyNames: ReadonlyArray<string>;
+  readonly viewRendererNames: ReadonlyArray<string>;
+  readonly tunnelProviderNames: ReadonlyArray<string>;
   readonly channelNames: ReadonlyArray<string>;
   readonly agentNames: ReadonlyArray<string>;
   readonly commandNames: ReadonlyArray<string>;
@@ -137,12 +149,18 @@ export class PluginHost implements PluginHostHandle {
   }
 
   registerDiscovered(plugin: Plugin, manifest: ResolvedPluginManifest): void {
-    if (this.loaded.has(plugin.name)) {
-      throw new Error(`Plugin already registered: ${plugin.name}`);
+    // Key the loaded map by the PACKAGE name — not the plugin's declared
+    // `name` — so it lines up with `discoverAndLoad`'s dedupe check, `reload`'s
+    // `wanted` set, and `unload(packageName)` callers (self-update, config,
+    // plugins-admin). Keying by `plugin.name` silently broke all three whenever
+    // a plugin's declared name differed from its package name (re-load throws,
+    // reload unloads everything, unload no-ops).
+    if (this.loaded.has(manifest.packageName)) {
+      throw new Error(`Plugin already registered: ${manifest.packageName}`);
     }
     this.assertRequirementsReady(plugin, manifest.requirements, 'discovered', manifest);
     const record = this.applyPlugin(plugin, manifest);
-    this.loaded.set(plugin.name, record);
+    this.loaded.set(manifest.packageName, record);
     this.clearSkip(plugin.name);
     this.clearSkip(manifest.packageName);
     this.opts.requirements.registerPlugin(plugin.name, plugin.version);
@@ -209,6 +227,9 @@ export class PluginHost implements PluginHostHandle {
     for (const provName of record.providerNames) this.opts.providers.unregister(provName);
     for (const modeName of record.modeNames) this.opts.modes.unregister(modeName);
     for (const compName of record.compactorNames) this.opts.compactors.unregister(compName);
+    for (const csName of record.cacheStrategyNames) this.opts.cacheStrategies.unregister(csName);
+    for (const vrName of record.viewRendererNames) this.opts.viewRenderers.unregister(vrName);
+    for (const tpName of record.tunnelProviderNames) this.opts.tunnelProviders.unregister(tpName);
     for (const channelName of record.channelNames) this.opts.channels.unregister(channelName);
     for (const agentName of record.agentNames) this.opts.agents.unregister(agentName);
     for (const cmdName of record.commandNames) this.opts.commands.unregister(cmdName);
@@ -242,6 +263,9 @@ export class PluginHost implements PluginHostHandle {
     const providerNames = (plugin.providers ?? []).map((p: ProviderDef) => p.name);
     const modeNames = (plugin.modes ?? []).map((l: ModeDef) => l.name);
     const compactorNames = (plugin.compactors ?? []).map((c: CompactorDef) => c.name);
+    const cacheStrategyNames = (plugin.cacheStrategies ?? []).map((c: CacheStrategyDef) => c.name);
+    const viewRendererNames = (plugin.viewRenderers ?? []).map((v: ViewRendererDef) => v.name);
+    const tunnelProviderNames = (plugin.tunnelProviders ?? []).map((t: TunnelProviderDef) => t.name);
     const channelNames = (plugin.channels ?? []).map((c: ChannelDef) => c.name);
     const agentNames = (plugin.agents ?? []).map((a: AgentDef) => a.name);
     const commandNames = (plugin.commands ?? []).map((c: CommandDef) => c.name);
@@ -251,6 +275,12 @@ export class PluginHost implements PluginHostHandle {
     for (const provider of plugin.providers ?? []) this.opts.providers.register(provider);
     for (const loop of plugin.modes ?? []) this.opts.modes.register(loop);
     for (const compactor of plugin.compactors ?? []) this.opts.compactors.register(compactor);
+    for (const cacheStrategy of plugin.cacheStrategies ?? [])
+      this.opts.cacheStrategies.register(cacheStrategy);
+    for (const viewRenderer of plugin.viewRenderers ?? [])
+      this.opts.viewRenderers.replace(viewRenderer);
+    for (const tunnelProvider of plugin.tunnelProviders ?? [])
+      this.opts.tunnelProviders.replace(tunnelProvider);
     for (const channel of plugin.channels ?? []) this.opts.channels.register(channel);
     for (const agent of plugin.agents ?? []) this.opts.agents.register(agent);
     for (const cmd of plugin.commands ?? []) this.opts.commands.register(cmd);
@@ -263,6 +293,9 @@ export class PluginHost implements PluginHostHandle {
       providerNames,
       modeNames,
       compactorNames,
+      cacheStrategyNames,
+      viewRendererNames,
+      tunnelProviderNames,
       channelNames,
       agentNames,
       commandNames,
