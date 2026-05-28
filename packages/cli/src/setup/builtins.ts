@@ -21,7 +21,7 @@ import {
   type MemoryStore,
 } from '@moxxy/plugin-memory';
 import { buildTelegramPlugin } from '@moxxy/plugin-telegram';
-import { buildMcpAdminPluginWithApi, type McpAdminApi } from '@moxxy/plugin-mcp';
+import { buildMcpAdminPluginWithApi } from '@moxxy/plugin-mcp';
 import { cliPlugin } from '@moxxy/plugin-cli';
 import { httpChannelPlugin } from '@moxxy/plugin-channel-http';
 import { buildWebChannelPlugin } from '@moxxy/plugin-channel-web';
@@ -333,9 +333,10 @@ export function buildBuiltinsCore(args: BuildBuiltinsArgs): BuiltBuiltinsCore {
         userSkillsDir: rawConfig.skills?.userDir,
       });
       // Stash the api on the session so the TUI / CLI can call
-      // enableAndAttach + detach without going through the model. Loose
-      // typing — `mcpAdmin` isn't part of Session's declared shape.
-      (session as unknown as { mcpAdmin: McpAdminApi }).mcpAdmin = api;
+      // enableAndAttach + detach without going through the model. `mcpAdmin` is
+      // a typed optional capability on Session (McpAdminView); McpAdminApi
+      // structurally satisfies it.
+      session.mcpAdmin = api;
       return { name: '@moxxy/plugin-mcp-admin', plugin };
     })(),
     {

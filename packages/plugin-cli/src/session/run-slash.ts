@@ -152,10 +152,7 @@ function openModelPicker(deps: SlashDeps): void {
   // at runtime, which the boot snapshot never sees. We refresh
   // session.readyProviders so the selection guard (picker-handlers) agrees.
   void (async () => {
-    const sess = deps.session as unknown as {
-      readyProviders?: Set<string>;
-      credentialResolver?: (name: string) => Promise<unknown>;
-    };
+    const sess = deps.session;
     let ready = sess.readyProviders ?? new Set<string>();
     if (sess.credentialResolver) {
       const resolver = sess.credentialResolver;

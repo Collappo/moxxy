@@ -47,6 +47,9 @@ export type {
   ToolInfo,
   SkillInfo,
   CommandInfo,
+  CredentialResolver,
+  McpAdminView,
+  McpServerStatusView,
 } from './session-like.js';
 
 export type {

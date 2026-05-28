@@ -82,9 +82,7 @@ function handleMcpAction(serverName: string, id: string, deps: PickerHandlerDeps
       );
       if (id === 'remove') {
         const ok = await removeServerFromConfig(serverName);
-        const api = (
-          deps.session as unknown as { mcpAdmin?: { detach: (n: string) => Promise<boolean> } }
-        ).mcpAdmin;
+        const api = deps.session.mcpAdmin;
         if (api) await api.detach(serverName);
         deps.setSystemNotice(
           ok ? `✓ removed MCP server "${serverName}"` : `no MCP server named "${serverName}"`,
@@ -100,14 +98,7 @@ function handleMcpAction(serverName: string, id: string, deps: PickerHandlerDeps
         }
         const nextDisabled = !current.disabled;
         await setServerDisabled(serverName, nextDisabled);
-        const api = (
-          deps.session as unknown as {
-            mcpAdmin?: {
-              enableAndAttach: (n: string) => Promise<{ toolNames: ReadonlyArray<string> } | null>;
-              detach: (n: string) => Promise<boolean>;
-            };
-          }
-        ).mcpAdmin;
+        const api = deps.session.mcpAdmin;
         if (api) {
           if (nextDisabled) {
             await api.detach(serverName);
@@ -139,9 +130,7 @@ function handleModelSelected(id: string, deps: PickerHandlerDeps): void {
   // If the provider wasn't in the boot probe's ready set, switching
   // would surface a credential error on the next turn. Intercept
   // here and surface the right configuration command instead.
-  const ready =
-    (deps.session as unknown as { readyProviders?: Set<string> }).readyProviders ??
-    new Set<string>();
+  const ready = deps.session.readyProviders ?? new Set<string>();
   if (!ready.has(providerId)) {
     const cmd =
       providerId === 'openai-codex'
@@ -161,11 +150,7 @@ function handleModelSelected(id: string, deps: PickerHandlerDeps): void {
   void (async () => {
     try {
       if (providerId !== deps.providerName) {
-        const resolver = (
-          deps.session as unknown as {
-            credentialResolver?: (name: string) => Promise<Record<string, unknown>>;
-          }
-        ).credentialResolver;
+        const resolver = deps.session.credentialResolver;
         const cfg = resolver ? await resolver(providerId) : {};
         // Drop any previously-cached instance for this provider so the
         // freshly-resolved credentials actually take effect — setActive

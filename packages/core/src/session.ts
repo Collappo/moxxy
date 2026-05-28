@@ -32,7 +32,9 @@ import { PermissionEngine } from './permissions/engine.js';
 import { autoAllowResolver } from './permissions/resolvers.js';
 import type {
   ApprovalResolver,
+  CredentialResolver,
   ElisionSettings,
+  McpAdminView,
   PendingToolCall,
   PermissionContext,
   PermissionResolver,
@@ -108,6 +110,15 @@ export class Session implements ClientSession, SessionRuntime {
   elisionSettings: ElisionSettings | null = null;
   /** Lazy tool loading toggle, from `config.context.lazyTools`. Default off. */
   lazyTools = false;
+  /**
+   * Live runtime capabilities the host installs on a local Session (see
+   * SessionLike). A RemoteSession leaves them undefined. Declared here — rather
+   * than monkey-patched on via `as unknown as` — so the host and channels get
+   * type-checked access.
+   */
+  readyProviders?: Set<string>;
+  credentialResolver?: CredentialResolver;
+  mcpAdmin?: McpAdminView;
   readonly dispatcher: HookDispatcherImpl;
   readonly pluginHost: PluginHost;
   private readonly controller = new AbortController();
@@ -271,7 +282,7 @@ export class Session implements ClientSession, SessionRuntime {
       // No mode active yet (registry empty pre-boot) - report null.
     }
     const active = this.providers.getActiveName();
-    const ready = (this as unknown as { readyProviders?: ReadonlySet<string> }).readyProviders;
+    const ready = this.readyProviders;
     return {
       sessionId: this.id,
       cwd: this.cwd,

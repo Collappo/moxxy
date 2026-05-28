@@ -15,20 +15,19 @@ fixed; the remaining 7 are below (design-change or large test-suite work).
 
 ## P1 — High, deferred (design or large effort)
 
-### 1. Promote runtime session capabilities onto the `ClientSession`/`SessionLike` contract
-**Findings:** plugin-cli #4, plugin-telegram #6, cross-cut 2.4 (all **high**). **Risk:** design-change.
-Channels reach off-contract via `session as unknown as { readyProviders | credentialResolver | mcpAdmin | detach }`:
-- read sites: `plugin-cli/src/session/run-slash.ts:155`, `picker-handlers.ts:86,104,143,165`,
-  `use-mcp-status.ts:21`; `plugin-telegram/src/channel/slash-handler.ts:134`, `callback-handler.ts:148,174`
-- write sites (CLI monkey-patches them on): `packages/cli/src/.../activate-provider.ts:123,132`, `builtins.ts:338`
-
-These casts silently break against a `RemoteSession` — the exact scenario the runner/thin-client
-split exists for. **Deferred because** it changes the SDK `ClientSession` contract and is entangled
-with the in-flight runner/thin-client work; it should be designed with that, not bolted on here.
-**Action:** add typed optional views to `ClientSession` (`mcpAdmin?`, `credentialResolver?`, and a
-reconciled `readyProviders` — contract says `ReadonlyArray<string>`, callers want `Set<string>`),
-set them via a typed setter on core's `Session` (not a cast), delete the `as unknown as` casts, and
-make the TUI/Telegram degrade gracefully when a `RemoteSession` leaves them undefined.
+### 1. Promote runtime session capabilities onto the contract — ⚠️ MOSTLY DONE
+**Findings:** plugin-cli #4, plugin-telegram #6, cross-cut 2.4 (all **high**).
+**Done:** added `CredentialResolver`, `McpAdminView`/`McpServerStatusView` to `@moxxy/sdk`,
+exposed `readyProviders?`/`credentialResolver?`/`mcpAdmin?` as typed optional members on
+`SessionLike` and as declared fields on core's `Session`, and **deleted every `as unknown as`
+cast** (8 sites across cli/plugin-cli/plugin-telegram + core's own `getInfo` self-cast).
+The host now sets them type-checked; channels read them type-checked.
+**Remaining (deferred — the genuine runner/thin-client coupling):** the channel handlers are still
+typed against the *concrete* `@moxxy/core` `Session`, not the `ClientSession`/`SessionLike` contract,
+so they would not yet compile against a `RemoteSession`. Retype `picker-handlers`/`use-mcp-status`/
+`run-slash`/telegram handler params to the SDK contract (now that it carries the capabilities) and
+verify graceful degradation when a `RemoteSession` leaves them undefined. Do this alongside the
+runner/thin-client work, not standalone.
 
 ### 2. Tests for security-critical code with zero coverage — ✅ DONE
 **Findings:** vault #10/#11, plugin-cli #5, plugin-mcp #14 (all **high**). Added on this branch (+85 tests):
