@@ -158,13 +158,13 @@ const HeaderBand: React.FC<{
       if (i > 0) {
         tabNodes.push(
           <Text key={`gap-${tab.id}`} backgroundColor={BAND_BG}>
-            {'    '}
+            {'  '}
           </Text>,
         );
-        used += 4;
+        used += 2;
       }
       const focused = tab.id === activeTabId;
-      const label = `    ${tab.label}    `;
+      const label = ` ${tab.label} `;
       tabNodes.push(
         focused ? (
           <Text key={tab.id} backgroundColor={ACTIVE_TAB_BG} color={ACTIVE_TAB_FG} bold>
