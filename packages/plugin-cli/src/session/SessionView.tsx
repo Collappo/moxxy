@@ -285,6 +285,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
         streamingDelta={stream.streamingDelta}
         expandToolOutputs={expandToolOutputs}
         compactTools={compactTools}
+        hideLive={overlay != null || picker != null}
       />
       <OverlayOrNotice
         overlay={overlay}
