@@ -7,8 +7,8 @@
 <h1 align="center">@moxxy/cli</h1>
 
 <p align="center">
-  <strong>The <code>moxxy</code> binary.</strong><br/>
-  Interactive TUI, one-shot prompts, channels, scheduler, MCP, services — all the surfaces in one bundled command.
+  The <code>moxxy</code> binary.<br/>
+  An interactive TUI, one-shot prompts, channels, scheduler, MCP, and OS services in a single bundled command.
 </p>
 
 <p align="center">
@@ -27,39 +27,43 @@
 </p>
 
 <p align="center">
-  <a href="#-installation">Install</a>
+  <a href="#installation">Install</a>
   &nbsp;·&nbsp;
-  <a href="#-quickstart">Quickstart</a>
+  <a href="#quickstart">Quickstart</a>
   &nbsp;·&nbsp;
   <a href="https://moxxy.ai">Docs</a>
   &nbsp;·&nbsp;
-  <a href="#-commands">Commands</a>
+  <a href="#commands">Commands</a>
   &nbsp;·&nbsp;
-  <a href="#-channels">Channels</a>
+  <a href="#channels">Channels</a>
   &nbsp;·&nbsp;
-  <a href="#-services">Services</a>
+  <a href="#services">Services</a>
 </p>
 
 ---
 
-## ✨ What this package is
+## What this package is
 
-`@moxxy/cli` is the published `moxxy` binary. It bundles the framework runtime, every built-in mode + provider + plugin, the Ink TUI channel, MCP support, the scheduler, webhooks, and the OS-service installer into a single executable.
+`@moxxy/cli` is the published `moxxy` binary. It bundles the framework runtime, every built-in mode, every built-in provider, every built-in plugin, the Ink TUI channel, MCP support, the scheduler, webhooks, and the OS service installer into a single executable.
 
-If you want to **use** moxxy, install this. If you want to **author plugins**, depend on [`@moxxy/sdk`](https://www.npmjs.com/package/@moxxy/sdk) instead.
+Install this if you want to use moxxy. If you want to author plugins, depend on [`@moxxy/sdk`](https://www.npmjs.com/package/@moxxy/sdk) instead.
 
-|   |   |
-|---|---|
-| 🧩 **Every block is a plugin** | Anthropic / OpenAI / ChatGPT-OAuth providers, five loop strategies, built-in Read/Edit/Write/Bash/Grep/Glob, MCP, memory, vault — all swappable. |
-| 📺 **Multi-channel** | TUI, Telegram, HTTP, web, cron, webhooks — one session, many surfaces. |
-| 🎙 **Voice in** | Telegram voice notes & `POST /v1/turn/audio` route through a `Transcriber` (Whisper plugin ships built-in). |
-| 🔐 **Vault** | AES-256-GCM secrets at rest; reference as `${vault:KEY}` in config. |
-| 🧠 **Long-term memory** | Journal-based with vector recall; TF-IDF built in, swap to OpenAI embeddings. |
-| ⏰ **Always-on** | `moxxy service install` for per-channel launchd / systemd units, or `moxxy serve --background` for everything in one process. |
-| 🪪 **Permission gating** | Every tool call gated; allow-always rules learned per tool. |
-| 🛡 **Pluggable isolation** | Opt-in capability sandboxing (`inproc` shipped; `worker` / `subprocess` / `wasm` / `docker` drop-in). Off by default. |
+## What you get out of the box
 
-## 🚀 Installation
+- A complete agent stack with Anthropic, OpenAI, and ChatGPT (OAuth) providers.
+- Five loop strategies: `tool-use` (default Claude-Code-style), `plan-execute`, `bmad`, `developer`, and `deep-research`.
+- Built-in tools: Read, Edit, Write, Bash, Grep, Glob, WebFetch, computer-control (macOS), and browser-session (Playwright, optional).
+- Multi-channel by design: TUI, Telegram, HTTP, web, cron, and webhooks. One session can drive several surfaces at once.
+- Voice input on any audio-capable channel through `@moxxy/plugin-stt-whisper`.
+- An encrypted vault (AES-256-GCM at rest) so secrets in config are referenced as `${vault:KEY}` and never written in plaintext.
+- A long-term memory subsystem with a journal and vector recall. TF-IDF ships built-in. Swap to OpenAI embeddings via `@moxxy/plugin-embeddings-openai`.
+- A permission resolver that gates every tool call and learns allow-always rules per tool.
+- Opt-in capability isolation. Tools declare what they need and an isolator enforces it. `inproc` ships built-in. `worker`, `subprocess`, `wasm`, and Docker isolators drop in behind the same interface.
+- A scheduler for cron expressions and one-shot ISO timestamps.
+- A webhook listener with HMAC verification, header and JSON-path filters, and a `cloudflared` or `ngrok` tunnel helper.
+- An OS service installer for launchd (macOS) and systemd (Linux), or a single `serve --background` process that runs every channel together.
+
+## Installation
 
 ```sh
 npm install -g @moxxy/cli
@@ -71,12 +75,12 @@ Or run it without installing:
 npx @moxxy/cli init
 ```
 
-**Requirements**: Node.js ≥ 20.10. An API key for a supported provider (Anthropic, OpenAI) — or sign into ChatGPT via `moxxy login openai-codex`.
+Requirements: Node.js 20.10 or later. An API key for a supported provider (Anthropic, OpenAI), or sign into ChatGPT via `moxxy login openai-codex`.
 
-## ⚡ Quickstart
+## Quickstart
 
 ```sh
-moxxy init      # interactive: choose provider, paste API key (goes into the vault)
+moxxy init      # interactive: choose provider, paste API key (stored in the vault)
 moxxy           # launch the interactive TUI
 ```
 
@@ -92,100 +96,104 @@ Resume a previous conversation:
 moxxy resume
 ```
 
-That's it. `moxxy --help` lists every command; `moxxy <command> --help` shows per-command details.
+`moxxy --help` lists every command. `moxxy <command> --help` shows per-command details.
 
-## 🧭 Commands
+## Commands
 
-The `moxxy` CLI groups commands the same way `moxxy --help` does:
+The CLI groups commands the same way `moxxy --help` does.
 
 ### Setup
 
 | Command | What it does |
 |---|---|
 | `moxxy init` | Interactive first-time setup. Picks a provider, captures the key, writes it into the vault. |
-| `moxxy login <provider>` | OAuth sign-in for providers that don't use API keys (e.g. `openai-codex`). |
+| `moxxy login <provider>` | OAuth sign-in for providers that do not use API keys (for example `openai-codex`). |
 | `moxxy login status` | Show stored OAuth credentials. |
 | `moxxy login logout <provider>` | Remove stored OAuth credentials. |
-| `moxxy doctor` | Diagnose your install — provider readiness, vault unlock, missing optional deps. |
+| `moxxy doctor` | Diagnose your install: provider readiness, vault unlock, missing optional dependencies. |
 
 ### Run
 
 | Command | What it does |
 |---|---|
-| `moxxy` | Default — start the Ink TUI. |
-| `moxxy tui` | Same, explicit. |
+| `moxxy` | Default. Starts the Ink TUI. |
+| `moxxy tui` | Same as above, explicit. |
 | `moxxy -p "…"` (or `--prompt`) | One-shot prompt to stdout. |
-| `moxxy resume [-s <id>]` | Resume a persisted session (interactive picker if no id). |
+| `moxxy resume [-s <id>]` | Resume a persisted session. Interactive picker if no id. |
 | `moxxy <channel>` | Start a registered channel by name. |
-| `moxxy channels` | List registered channels + their subcommands. |
-| `moxxy serve` | Start every channel + the scheduler + webhooks in one process. |
+| `moxxy channels` | List registered channels and their subcommands. |
+| `moxxy serve` | Start every channel together with the scheduler and webhooks in one process. |
 
 ### Manage
 
 | Command | What it does |
 |---|---|
-| `moxxy sessions list` / `delete` | Inspect or remove persisted sessions. |
-| `moxxy skills list` / `new` / `audit` | Manage skill files (user / project / builtin / plugin scopes). |
-| `moxxy plugins list` / `reload` / `new` | Manage the plugin host; reload picks up newly installed packages. |
-| `moxxy mcp list` / `add` / `enable` / `disable` / `remove` | Manage MCP servers in `~/.moxxy/mcp.json`. |
-| `moxxy perms list` / `add` / `remove` | Inspect or edit the persisted permission rules. |
-| `moxxy memory journal` / `recall` | Read or query long-term memory. |
-| `moxxy schedule add` / `list` / `remove` | Time-driven prompts (cron or one-shot ISO). |
-| `moxxy security audit` / `status` / `isolators` | Inspect tool capability declarations and active isolator. |
-| `moxxy service install` / `logs` / `status` / `uninstall` | Background OS services (launchd / systemd). |
-| `moxxy self-update` | Update bundled plugins/skills/core safely. |
+| `moxxy sessions list` and `delete` | Inspect or remove persisted sessions. |
+| `moxxy skills list`, `new`, `audit` | Manage skill files across user, project, builtin, and plugin scopes. |
+| `moxxy plugins list`, `reload`, `new` | Manage the plugin host. `reload` picks up newly installed packages. |
+| `moxxy mcp list`, `add`, `enable`, `disable`, `remove` | Manage MCP servers in `~/.moxxy/mcp.json`. |
+| `moxxy perms list`, `add`, `remove` | Inspect or edit the persisted permission rules. |
+| `moxxy memory journal` and `recall` | Read or query long-term memory. |
+| `moxxy schedule add`, `list`, `remove` | Time-driven prompts (cron or one-shot ISO). |
+| `moxxy security audit`, `status`, `isolators` | Inspect tool capability declarations and the active isolator. |
+| `moxxy service install`, `logs`, `status`, `uninstall` | Background OS services (launchd or systemd). |
+| `moxxy self-update` | Update bundled plugins, skills, and core safely. |
 
 ### Flags
 
 | Flag | What it does |
 |---|---|
-| `--prompt, -p "…"` | One-shot input. |
+| `--prompt`, `-p "…"` | One-shot input. |
 | `--model <id>` | Override the default model for this invocation. |
-| `--output-format <fmt>` | `text` \| `json` \| `stream-json` (one-shot output mode). |
+| `--output-format <fmt>` | `text`, `json`, or `stream-json` (one-shot output mode). |
 | `--cwd <path>` | Set the agent's working directory. |
 | `--config <path>` | Load a specific `moxxy.config.ts`. |
 | `--no-color` | Disable ANSI colors. |
-| `-h, --help` / `-v, --version` | Standard. |
+| `-h`, `--help`, `-v`, `--version` | Standard. |
 
 ### Environment
 
 | Variable | What it does |
 |---|---|
 | `ANTHROPIC_API_KEY` | Default Anthropic provider key. |
-| `OPENAI_API_KEY` | OpenAI provider key (and openai embeddings). |
+| `OPENAI_API_KEY` | OpenAI provider key (also used by the openai embeddings plugin). |
 | `MOXXY_VAULT_PASSPHRASE` | Headless vault unlock when no OS keychain is available. |
-| `MOXXY_FIXTURES` | `record` \| `replay` — provider fixture mode (used by tests). |
+| `MOXXY_FIXTURES` | `record` or `replay`. Provider fixture mode used by tests. |
 
-## 📺 Channels
+## Channels
 
-Run your agent through whatever surface fits the task:
+Run your agent through whichever surface fits the task.
 
 | Channel | What it does | Command |
 |---|---|---|
-| **TUI** | Grok-style interactive terminal UI | `moxxy` |
-| **Telegram** | Message your agent from anywhere; voice notes get transcribed and run as turns; pairs with a 6-digit code | `moxxy telegram` |
-| **HTTP** | `POST /v1/turn` (JSON, SSE streaming) or `POST /v1/turn/audio` (raw bytes, iOS Shortcut friendly), bearer-token auth | `moxxy channels http` |
-| **Cron** | Time-driven prompts (cron expressions or one-shot ISO timestamps) | `moxxy schedule add …` |
-| **Webhooks** | External systems fire prompts on signed POST. HMAC + bearer + filter rules. | `moxxy serve` (auto-starts the listener) |
+| TUI | Grok-style interactive terminal UI. | `moxxy` |
+| Telegram | Message the agent from anywhere. Voice notes get transcribed and run as turns. Pairs with a 6-digit code. | `moxxy telegram` |
+| HTTP | `POST /v1/turn` (JSON, SSE streaming) and `POST /v1/turn/audio` (raw bytes, iOS Shortcut friendly), bearer-token auth. | `moxxy channels http` |
+| Cron | Time-driven prompts. Cron expressions or one-shot ISO timestamps. | `moxxy schedule add …` |
+| Webhooks | External systems fire prompts on signed POST. HMAC plus bearer plus filter rules. | `moxxy serve` (auto-starts the listener) |
 
-## ⏰ Services
+## Services
 
-Two ways to keep moxxy online 24/7:
+Two ways to keep moxxy online 24/7.
+
+Per-channel units, one process each so failures stay independent:
 
 ```sh
-# Per-channel units (one process each, independent crashes)
 moxxy service install telegram     # launchd on macOS, systemd --user on Linux
 moxxy service logs telegram         # tail the log
+```
 
-# Or: one process for everything, shared event log
-moxxy serve --background            # every channel + scheduler + webhooks
-moxxy serve --background --except http   # skip what you don't want
+Or one process for everything, with a shared event log:
+
+```sh
+moxxy serve --background            # every channel plus the scheduler plus webhooks
+moxxy serve --background --except http   # skip what you do not want
 moxxy serve --status                # is it running?
 ```
 
-Logs land in `~/.moxxy/services/<name>.log`; units survive reboots.
+Logs land in `~/.moxxy/services/<name>.log`. The units survive reboots.
 
-## ⚙ Configuration
+## Configuration
 
 `moxxy.config.ts` at your project root:
 
@@ -207,31 +215,14 @@ export default defineConfig({
 
 `${vault:NAME}` placeholders resolve on session start. The vault unlocks via OS keychain (`keytar`) with a passphrase fallback (`MOXXY_VAULT_PASSPHRASE` for headless boxes).
 
-## 🧩 What ships in the binary
+## Docs
 
-The CLI bundles a complete out-of-the-box stack:
+Full documentation lives at [docs.moxxy.ai](https://docs.moxxy.ai): concepts, recipes, plugin authoring, channel guides. The marketing site is at [moxxy.ai](https://moxxy.ai).
 
-- **Providers**: Anthropic, OpenAI, ChatGPT-OAuth (via `openai-codex`).
-- **Loop strategies**: `tool-use` (default Claude-Code-style), `plan-execute`, `bmad`, `developer`, `deep-research`.
-- **Tools**: Read, Edit, Write, Bash, Grep, Glob, WebFetch, browser-session (Playwright, optional), computer-control (macOS).
-- **MCP**: register any Model Context Protocol server as a tool source.
-- **Skills**: prompt-only Markdown files; the agent can author new skills for itself.
-- **Memory**: long-term journal + STM selectors; TF-IDF vector recall ships built in.
-- **Vault**: AES-256-GCM secrets at rest, `${vault:KEY}` references in config.
-- **Voice in**: `@moxxy/plugin-stt-whisper` for any audio-capable channel.
-- **Webhooks**: signed HTTP listener + `cloudflared` / `ngrok` tunnel helper.
-- **Security**: opt-in capability isolation (`inproc` built-in; `worker` / `subprocess` / `wasm` drop in).
+## Contributing
 
-For the full package map and the framework's internal architecture see the [root README](https://github.com/moxxy-ai/new_moxxy#-developer-guide).
+PRs welcome. The issue tracker and author guides live in the [moxxy monorepo](https://github.com/moxxy-ai/new_moxxy).
 
-## 📚 Docs
+## License
 
-Full docs at **[docs.moxxy.ai](https://docs.moxxy.ai)**: concepts, recipes, plugin authoring, channel guides. Marketing site: [moxxy.ai](https://moxxy.ai).
-
-## 🤝 Contributing
-
-PRs welcome. Issue tracker + author guides live in the [moxxy monorepo](https://github.com/moxxy-ai/new_moxxy).
-
-## 📝 License
-
-TBD.
+MIT. See the repository root for the full text.

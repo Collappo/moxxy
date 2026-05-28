@@ -1,19 +1,31 @@
 name: Release
 
-# On push to main, open (or update) a "Version Packages" PR that bumps versions
-# + changelogs from accumulated changesets. Merging that PR re-triggers this
-# workflow, which then publishes the changed published packages to npm.
+# On push to main this workflow has two modes:
 #
-# Requires an NPM_TOKEN repo secret (npm automation token with publish rights
-# for the @moxxy scope). GITHUB_TOKEN is provided automatically.
+#   1. There are pending changesets in `.changeset/`: open or update a
+#      "Version Packages" PR that bumps versions + changelogs.
+#   2. The Version Packages PR has just been merged: publish every
+#      non-private workspace package whose version is not yet on npm.
 #
-# Changesets is invoked via `pnpm dlx` (no devDep / lockfile entry) so this
-# works without a `pnpm install` to add @changesets/cli. For nicer local DX you
-# can later add `@changesets/cli` to root devDependencies and run `pnpm install`.
+# Mode 2 runs through `scripts/safe-publish.mjs` rather than the default
+# `changesets publish`. That wrapper:
+#   - skips packages whose current version is already on the registry
+#     (matches the behaviour of `changesets publish` for unchanged packages),
+#   - auto-bumps past tombstoned versions until a free slot is found, and
+#     commits those bumps back to main so the next release does not have
+#     to walk them again,
+#   - emits the `🦋  New tag: ...` markers `changesets/action` greps for so
+#     GitHub releases continue to be created automatically.
+#
+# Required repo secret:
+#   - NPM_TOKEN: npm automation token with publish rights for the @moxxy scope.
+# GITHUB_TOKEN is provided automatically.
 on:
   push:
     branches: [main]
 
+# Serialise releases. We do not cancel in flight because cancelling a
+# publish midway can leave one package on the registry and another not.
 concurrency: release
 
 permissions:
@@ -27,6 +39,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The safe-publish script may commit follow-up version bumps when
+          # it walks past tombstoned npm slots. Fetch enough history that
+          # the resulting `git push` is a fast-forward.
+          fetch-depth: 0
 
       - name: Install pnpm
         uses: pnpm/action-setup@v4
@@ -44,8 +61,8 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      # Build so the prepack/postpack flow (strip @moxxy/* devDeps, bundle) runs
-      # against fresh dist before publish.
+      # Build so the prepack/postpack flow (strip @moxxy/* devDeps, bundle)
+      # runs against a fresh dist before publish.
       - name: Build
         run: pnpm build
 
@@ -53,7 +70,7 @@ jobs:
         uses: changesets/action@v1
         with:
           version: pnpm dlx @changesets/cli@2.27.10 version
-          publish: pnpm dlx @changesets/cli@2.27.10 publish
+          publish: node scripts/safe-publish.mjs
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}

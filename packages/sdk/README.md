@@ -7,8 +7,8 @@
 <h1 align="center">@moxxy/sdk</h1>
 
 <p align="center">
-  <strong>Typed public surface for the moxxy framework.</strong><br/>
-  Zero runtime deps. The contract every plugin, channel, and provider speaks.
+  The typed public surface for the moxxy framework.<br/>
+  Zero runtime dependencies. The contract every plugin, channel, and provider speaks.
 </p>
 
 <p align="center">
@@ -27,42 +27,42 @@
 </p>
 
 <p align="center">
-  <a href="#-installation">Install</a>
+  <a href="#installation">Install</a>
   &nbsp;·&nbsp;
-  <a href="#-quickstart">Quickstart</a>
+  <a href="#quickstart">Quickstart</a>
   &nbsp;·&nbsp;
   <a href="https://moxxy.ai">Docs</a>
   &nbsp;·&nbsp;
-  <a href="#-what-the-sdk-gives-you">Surface</a>
+  <a href="#what-the-sdk-gives-you">Surface</a>
   &nbsp;·&nbsp;
-  <a href="#-authoring-a-plugin">Plugin guide</a>
+  <a href="#authoring-a-plugin">Plugin guide</a>
 </p>
 
 ---
 
-## ✨ What this package is
+## What this package is
 
-`@moxxy/sdk` is the **typed contract** between moxxy and everything that plugs into it: providers, modes (loop strategies), tools, channels, compactors, cache strategies, isolators, transcribers, view renderers, tunnel providers, agents, commands, skills.
+`@moxxy/sdk` is the typed contract between the moxxy runtime and everything that plugs into it. Providers, modes, tools, channels, compactors, cache strategies, isolators, transcribers, view renderers, tunnel providers, agents, commands, and skills all use it as their interface to the runtime.
 
-It exports:
+The package exports:
 
-- `define*({…})` factories — the only blessed way to author each kind of block.
-- The `MoxxyEvent` union — every event the runtime can emit or replay.
-- `ClientSession`, `SessionLike` — the views channels and modes see.
-- Lifecycle hook signatures (`onTurnStart`, `onAssistantMessage`, …).
-- Helper utilities that don't drag the runtime along — token accounting, compactor helpers, schema → JSON schema, tool gating, embedding cache, retryable-error classification.
+- `define*` factories, the only blessed way to author each kind of block.
+- The `MoxxyEvent` discriminated union, covering every event the runtime can emit or replay.
+- `ClientSession` and `SessionLike`, the views channels and modes see.
+- Lifecycle hook signatures (`onTurnStart`, `onAssistantMessage`, and so on).
+- Small helper utilities that do not pull the runtime along: token accounting, compactor helpers, zod-to-JSON-Schema, tool gating, embedding caching, retryable-error classification.
 
-It is the **only** moxxy package safe to depend on from a published plugin. `@moxxy/core` is the runtime — plugins never import it.
+It is the only moxxy package safe to depend on from a published plugin. `@moxxy/core` is the runtime, and plugins never import it.
 
-|   |   |
-|---|---|
-| 🧩 **Zero runtime deps** | The package builds without pulling anything into your bundle. `zod` is a `peerDependency`. |
-| 🔌 **One contract, every block** | Same shape for tools, channels, providers, compactors, … — once you've written one plugin you know how to write the next. |
-| 🛡 **Strict TypeScript** | Types-as-docs. `defineTool` is generic on its zod schema so handlers are fully inferred. |
-| 🪶 **Type-only views** | `SessionLike` exposes what a channel needs without exposing the registry internals — keeps coupling honest. |
-| 📜 **Event-log first** | Every block is reactive over a single typed event stream — no hidden globals, easy to record/replay. |
+## Why depend on the SDK
 
-## 🚀 Installation
+- **Zero runtime dependencies.** The package builds without pulling anything into your bundle. `zod` is declared as a peer dependency so your plugin and the host agree on one copy.
+- **One contract, every block.** The shape is consistent across tools, channels, providers, compactors, and the rest. Once you have written one plugin you know how to write the next.
+- **Strict TypeScript.** `defineTool` is generic on its zod schema so handler arguments are fully inferred. Types double as documentation.
+- **Type-only views into the runtime.** `SessionLike` exposes only what a channel needs and keeps the rest of the registry private.
+- **Event-log first.** Every block is reactive over a single typed event stream. No hidden globals, easy to record and replay.
+
+## Installation
 
 ```sh
 npm install @moxxy/sdk zod
@@ -70,11 +70,11 @@ npm install @moxxy/sdk zod
 # or: yarn add @moxxy/sdk zod
 ```
 
-`zod` is declared as a `peerDependency` — the SDK doesn't ship it so your plugin and the host agree on one copy.
+`zod` is a peer dependency. The SDK does not ship it.
 
-**Requirements**: Node.js ≥ 20.10. Strict TypeScript recommended.
+Requirements: Node.js 20.10 or later. Strict TypeScript is recommended.
 
-## ⚡ Quickstart
+## Quickstart
 
 A tool plugin in nine lines:
 
@@ -94,7 +94,7 @@ export default definePlugin({
 });
 ```
 
-Add a `"moxxy"` block to your `package.json` and moxxy auto-discovers it:
+Add a `"moxxy"` block to your `package.json` and moxxy auto-discovers it on the next launch:
 
 ```json
 {
@@ -102,38 +102,38 @@ Add a `"moxxy"` block to your `package.json` and moxxy auto-discovers it:
 }
 ```
 
-That's it. `moxxy plugins list` (or any TUI session) will see your tool on next launch.
+That is the whole setup. `moxxy plugins list` will show your tool on the next session start.
 
-## 🧩 What the SDK gives you
+## What the SDK gives you
 
 ### `define*` factories
 
 | Factory | Defines |
 |---|---|
-| `definePlugin` | A bundle of any of the below, the discoverable unit |
-| `defineTool` | A callable tool, zod-typed input, optional `permission` / `isolation` / `compact` presentation |
-| `defineProvider` | An LLM backend (Anthropic / OpenAI / custom) |
-| `defineMode` | A loop strategy (`tool-use`, `plan-execute`, `bmad`, …) — the agent's iteration topology |
-| `defineCompactor` | Context-window compaction strategy (summarise / drop / hybrid) |
-| `defineCacheStrategy` | Where to place provider cache breakpoints |
-| `defineChannel` | A user-facing surface (TUI / HTTP / Telegram / web / …) |
-| `defineCommand` | A `/slash` command surfaced in every channel that hosts commands |
-| `defineSkill` | A prompt-only Markdown skill (frontmatter + body) |
-| `defineAgent` | A subagent kind dispatchable from the parent loop |
-| `defineTranscriber` | A speech-to-text backend wired into every audio-capable channel |
-| `definePermission` | A permission rule contributed to the resolver chain |
-| `defineViewRenderer` | A target for the agent-authored UI primitives |
-| `defineTunnelProvider` | A public-URL tunnel (cloudflared / ngrok / …) for HTTP channels |
-| `defineIsolator` *(via `@moxxy/plugin-security`)* | A capability sandbox; the SDK exports the `Isolator` interface and the `ISOLATION_RANK` ordering |
+| `definePlugin` | A bundle of any of the below. The discoverable unit. |
+| `defineTool` | A callable tool with a zod-typed input, optional `permission`, `isolation`, and `compact` display config. |
+| `defineProvider` | An LLM backend such as Anthropic, OpenAI, or a custom service. |
+| `defineMode` | A loop strategy. The agent's iteration topology (`tool-use`, `plan-execute`, `bmad`, and so on). |
+| `defineCompactor` | A context-window compaction strategy (summarise, drop, hybrid). |
+| `defineCacheStrategy` | Where to place provider cache breakpoints. |
+| `defineChannel` | A user-facing surface (TUI, HTTP, Telegram, web). |
+| `defineCommand` | A `/slash` command surfaced in every channel that hosts commands. |
+| `defineSkill` | A prompt-only Markdown skill (frontmatter + body). |
+| `defineAgent` | A subagent kind dispatchable from the parent loop. |
+| `defineTranscriber` | A speech-to-text backend wired into every audio-capable channel. |
+| `definePermission` | A permission rule contributed to the resolver chain. |
+| `defineViewRenderer` | A target for the agent-authored UI primitives. |
+| `defineTunnelProvider` | A public-URL tunnel for HTTP channels (cloudflared, ngrok). |
+| `defineIsolator` (via `@moxxy/plugin-security`) | A capability sandbox. The SDK exports the `Isolator` interface and the `ISOLATION_RANK` ordering. |
 
-### Types & events
+### Types and events
 
 ```ts
 import type {
-  MoxxyEvent,           // discriminated union of every event in the log
-  EventLogReader,       // stable view over the session's event log
-  ClientSession,        // what channels and slash-commands see
-  SessionLike,          // what modes / providers / tools see
+  MoxxyEvent,            // the discriminated union of every event in the log
+  EventLogReader,        // a stable view over the session's event log
+  ClientSession,         // what channels and slash-commands see
+  SessionLike,           // what modes, providers, and tools see
   PendingToolCall,
   PermissionDecision,
   ApprovalRequest, ApprovalDecision,
@@ -145,20 +145,20 @@ import type {
 
 ### Helpers
 
-- **`zodToJsonSchema`** — convert a zod schema to JSON Schema for provider tool calls.
-- **`isRetryableError`** / **`toFriendlyError`** — classify provider errors uniformly.
-- **`estimateContextTokens`**, **`runCompactionIfNeeded`** — compactor scaffolding.
-- **`CachedEmbeddingProvider`** — wrap any `EmbeddingProvider` with on-disk caching.
-- **`dispatchToolCall`** — invoke a tool through the full gating + permission + isolation pipeline.
-- **`summarizeSessionTokensFromEvents`**, **`summarizeTokensByModel`** — pure token accounting over the event log.
+- `zodToJsonSchema` converts a zod schema to JSON Schema for provider tool calls.
+- `isRetryableError` and `toFriendlyError` classify provider errors uniformly.
+- `estimateContextTokens` and `runCompactionIfNeeded` are scaffolding for custom compactors.
+- `CachedEmbeddingProvider` wraps any `EmbeddingProvider` with on-disk caching.
+- `dispatchToolCall` invokes a tool through the full gating, permission, and isolation pipeline.
+- `summarizeSessionTokensFromEvents` and `summarizeTokensByModel` give pure token accounting over the event log.
 
 ### Lifecycle hooks
 
-A plugin can declare optional hooks: `onSessionStart`, `onTurnStart`, `onAssistantMessage`, `onToolResult`, `onError`, `onCompact`, `onSessionEnd`. All are strongly typed and fire in plugin-registration order. The SDK exposes the hook context types; the runtime in `@moxxy/core` is responsible for actually invoking them.
+A plugin can declare optional hooks: `onSessionStart`, `onTurnStart`, `onAssistantMessage`, `onToolResult`, `onError`, `onCompact`, and `onSessionEnd`. All are strongly typed and fire in plugin-registration order. The SDK exposes the hook context types. `@moxxy/core` invokes them at the right point in the loop.
 
-## 🛠 Authoring a plugin
+## Authoring a plugin
 
-A tool plugin (minimum surface):
+A tool plugin with the minimum surface:
 
 ```ts
 import { definePlugin, defineTool, z } from '@moxxy/sdk';
@@ -171,11 +171,11 @@ export default definePlugin({
       description: 'Fetch current weather for a city.',
       inputSchema: z.object({ city: z.string() }),
       // Handler args are inferred from the zod schema.
-      handler: async ({ city }, ctx) => {
+      handler: async ({ city }) => {
         const res = await fetch(`https://wttr.in/${encodeURIComponent(city)}?format=j1`);
         return res.json();
       },
-      // Optional: gate the call, declare capabilities, customise compact display.
+      // Optional: gate the call, declare capabilities, customise the compact display.
       permission: { action: 'prompt' },
       isolation: { capabilities: { net: { allow: ['wttr.in'] } } },
       compact: { verb: 'Reading weather', subject: ({ city }) => city },
@@ -207,7 +207,7 @@ A mode (loop strategy):
 import { definePlugin, defineMode, type ModeContext, type MoxxyEvent } from '@moxxy/sdk';
 
 async function* runMyMode(ctx: ModeContext): AsyncIterable<MoxxyEvent> {
-  // emit events, call providers, dispatch tools — return when the turn ends.
+  // emit events, call providers, dispatch tools, return when the turn ends.
 }
 
 export default definePlugin({
@@ -220,20 +220,20 @@ export default definePlugin({
 });
 ```
 
-Per-block author guides (skill, plugin, tool, channel, provider, loop strategy, compactor, cache strategy) live in the monorepo at [`.claude/agents/`](https://github.com/moxxy-ai/new_moxxy/tree/main/.claude/agents).
+Per-block author guides for skill, plugin, tool, channel, provider, loop strategy, compactor, and cache strategy live in the monorepo at [`.claude/agents/`](https://github.com/moxxy-ai/new_moxxy/tree/main/.claude/agents).
 
-## 🏛 Architectural rules
+## Architectural rules
 
-- **`@moxxy/sdk` has zero internal deps.** Enforced in CI via `pnpm check:deps`.
-- **`@moxxy/core` doesn't import any plugin.** Plugins flow into core through the SDK only.
-- **Plugins never import `@moxxy/core`.** If you find yourself wanting to, the missing piece belongs in the SDK.
+Three invariants keep the framework swappable:
 
-These three invariants are what keep the framework swappable.
+1. `@moxxy/sdk` has zero internal dependencies. Enforced in CI via `pnpm check:deps`.
+2. `@moxxy/core` does not import any plugin. Plugins flow into core through the SDK only.
+3. Plugins never import `@moxxy/core`. If you find yourself wanting to, the missing piece belongs in the SDK.
 
-## 📚 Docs
+## Docs
 
-Full docs at **[docs.moxxy.ai](https://docs.moxxy.ai)** — concepts, plugin author guides, channel guides, recipes.
+Full documentation lives at [docs.moxxy.ai](https://docs.moxxy.ai): concepts, plugin author guides, channel guides, and recipes.
 
-## 📝 License
+## License
 
-TBD.
+MIT. See the repository root for the full text.
