@@ -15,6 +15,9 @@ pub struct NodeSidecarConfig {
     pub cli_entry: String,
     pub extra_args: Vec<String>,
     pub cwd: Option<std::path::PathBuf>,
+    /// Extra env vars set on the child. The pool uses this to point each
+    /// ephemeral runner at its own `MOXXY_RUNNER_SOCKET`.
+    pub env: Vec<(String, String)>,
 }
 
 impl Default for NodeSidecarConfig {
@@ -24,6 +27,7 @@ impl Default for NodeSidecarConfig {
             cli_entry: String::new(),
             extra_args: Vec::new(),
             cwd: None,
+            env: Vec::new(),
         }
     }
 }
@@ -67,6 +71,9 @@ impl Sidecar for NodeSidecar {
         }
         if let Some(cwd) = &self.cfg.cwd {
             cmd.current_dir(cwd);
+        }
+        for (k, v) in &self.cfg.env {
+            cmd.env(k, v);
         }
         cmd.stdin(Stdio::null())
             .stdout(Stdio::piped())

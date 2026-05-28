@@ -15,9 +15,12 @@
     clippy::needless_pass_by_value
 )]
 
+pub mod bridge_registry;
 pub mod desks;
 pub mod error;
 pub mod jsonrpc;
+pub mod pool;
 pub mod runner_bridge;
 pub mod sidecar;
 pub mod transport;
+pub mod windows;
