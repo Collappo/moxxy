@@ -1,5 +1,6 @@
 import { describe, expect, it, beforeEach, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, act } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { App } from './App';
 import { mockTauri } from '@/__mocks__/tauri';
 
@@ -8,6 +9,7 @@ vi.mock('@/lib/tauri', () => import('@/__mocks__/tauri'));
 describe('<App />', () => {
   beforeEach(() => {
     mockTauri.reset();
+    mockTauri.respond('runner_ready', () => false);
   });
 
   it('renders the brand mark in the empty state', () => {
@@ -23,11 +25,12 @@ describe('<App />', () => {
     await waitFor(() => expect(label).toHaveTextContent('running'));
   });
 
-  it('shows the "connect a provider" hint once running', async () => {
+  it('switches the hint when the runner is ready', async () => {
     mockTauri.respond('sidecar_status', () => 'running');
+    mockTauri.respond('runner_ready', () => true);
     render(<App />);
     expect(
-      await screen.findByText(/Connect a provider to start your first turn/),
+      await screen.findByText(/Type a prompt below/),
     ).toBeInTheDocument();
   });
 
@@ -37,5 +40,49 @@ describe('<App />', () => {
     expect(
       await screen.findByText(/Runner offline/),
     ).toBeInTheDocument();
+  });
+
+  it('renders user + assistant blocks after sending and receiving chunks', async () => {
+    mockTauri.respond('sidecar_status', () => 'running');
+    mockTauri.respond('runner_ready', () => true);
+    mockTauri.respond('run_turn', () => 'T-1');
+
+    render(<App />);
+    await screen.findByText(/Type a prompt below/);
+
+    const input = await screen.findByTestId('composer-input');
+    await userEvent.type(input, 'hello there');
+    await userEvent.click(screen.getByTestId('composer-send'));
+
+    expect(await screen.findByTestId('block-user')).toHaveTextContent(
+      'hello there',
+    );
+
+    act(() => {
+      mockTauri.emit('runner.event', { kind: 'chunk', text: 'Hi!' });
+      mockTauri.emit('runner.turn.complete', { turnId: 'T-1' });
+    });
+
+    expect(await screen.findByTestId('block-assistant')).toHaveTextContent(
+      'Hi!',
+    );
+    // After complete, send button is back.
+    expect(screen.getByTestId('composer-send')).toBeInTheDocument();
+  });
+
+  it('shows an abort button while a turn is in flight', async () => {
+    mockTauri.respond('sidecar_status', () => 'running');
+    mockTauri.respond('runner_ready', () => true);
+    mockTauri.respond('run_turn', () => 'T-1');
+
+    render(<App />);
+    await screen.findByText(/Type a prompt below/);
+
+    const input = await screen.findByTestId('composer-input');
+    await userEvent.type(input, 'hi');
+    await userEvent.click(screen.getByTestId('composer-send'));
+
+    expect(await screen.findByTestId('composer-abort')).toBeInTheDocument();
+    expect(screen.queryByTestId('composer-send')).toBeNull();
   });
 });

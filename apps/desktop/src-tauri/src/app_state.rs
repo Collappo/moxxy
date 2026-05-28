@@ -1,8 +1,10 @@
 //! Composition root. Holds Arc<dyn _> capability handles for the running app.
 
 use std::sync::Arc;
+use tokio::sync::Mutex;
 
 use moxxy_desktop_core::desks::{json_store::JsonDeskStore, DeskStore};
+use moxxy_desktop_core::runner_bridge::RunnerBridge;
 use moxxy_desktop_core::sidecar::Sidecar;
 use moxxy_desktop_core::transport::RunnerTransport;
 #[cfg(not(test))]
@@ -13,6 +15,10 @@ pub struct AppState {
     pub desks: Arc<dyn DeskStore>,
     pub sidecar: Arc<dyn Sidecar>,
     pub transport: Arc<dyn RunnerTransport>,
+    /// Set once the primary runner is up and the bridge has attached.
+    /// Wrapped in `Mutex<Option<…>>` so the boot task can install it
+    /// from a background task while commands stay non-blocking.
+    pub bridge: Arc<Mutex<Option<RunnerBridge>>>,
 }
 
 impl AppState {
@@ -40,6 +46,7 @@ impl AppState {
             desks,
             sidecar,
             transport,
+            bridge: Arc::new(Mutex::new(None)),
         })
     }
 
@@ -59,6 +66,13 @@ impl AppState {
             desks,
             sidecar,
             transport,
+            bridge: Arc::new(Mutex::new(None)),
         }
+    }
+
+    /// True once the runner bridge has attached. UI uses this to decide
+    /// whether to render the chat composer (vs the "starting runner" state).
+    pub async fn has_bridge(&self) -> bool {
+        self.bridge.lock().await.is_some()
     }
 }

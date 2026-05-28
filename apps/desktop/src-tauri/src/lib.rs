@@ -17,6 +17,7 @@
 )]
 
 pub mod app_state;
+pub mod boot;
 pub mod commands;
 
 // Re-export the core for downstream Tauri code that wants the traits in
@@ -41,7 +42,10 @@ pub fn run() {
         .setup(|app| {
             use tauri::Manager;
             let state = app_state::AppState::production(app.handle())?;
-            app.manage(state);
+            app.manage(state.clone());
+            // Spawn the boot task — sidecar start, wait for runner, attach
+            // the bridge, then pump events. Window already shows.
+            boot::spawn(app.handle().clone(), state);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -51,6 +55,9 @@ pub fn run() {
             commands::desks_remove,
             commands::desks_set_active,
             commands::desks_active,
+            commands::run_turn,
+            commands::abort_turn,
+            commands::runner_ready,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

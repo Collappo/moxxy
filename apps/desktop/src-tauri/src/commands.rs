@@ -1,11 +1,13 @@
 //! Tauri commands — the JS-callable surface. Thin wrappers over the
 //! capability traits owned by [`AppState`].
 
+use serde::Deserialize;
 use tauri::State;
 
 use crate::app_state::AppState;
 use moxxy_desktop_core::desks::{Desk, DeskId};
 use moxxy_desktop_core::error::AppResult;
+use moxxy_desktop_core::runner_bridge::RunTurnParams;
 use moxxy_desktop_core::sidecar::SidecarStatus;
 
 #[tauri::command]
@@ -38,4 +40,62 @@ pub async fn desks_set_active(state: State<'_, AppState>, id: String) -> AppResu
 #[tauri::command]
 pub async fn desks_active(state: State<'_, AppState>) -> AppResult<Option<DeskId>> {
     state.desks.active().await
+}
+
+/// Args for `run_turn`. Kept distinct from the core `RunTurnParams` so we
+/// can add IPC-only fields (e.g. window id, attachments by path) without
+/// touching the wire-facing struct.
+#[derive(Debug, Deserialize)]
+pub struct RunTurnArgs {
+    pub prompt: String,
+    #[serde(default)]
+    pub model: Option<String>,
+}
+
+/// Take an owned Arc<Mutex<_>> handle before awaiting on the lock —
+/// otherwise the lock future borrows from `State<'_, _>`, which isn't
+/// `'static` and Tauri command futures must be.
+async fn clone_bridge(
+    state: &AppState,
+) -> Result<moxxy_desktop_core::runner_bridge::RunnerBridge, String> {
+    let slot = state.bridge.clone();
+    let guard = slot.lock().await;
+    guard
+        .as_ref()
+        .cloned()
+        .ok_or_else(|| "runner not connected — try again in a moment".to_string())
+}
+
+/// Issue a turn to the connected primary runner. Returns the turn id;
+/// events stream out as `runner.event` Tauri events from the fan-out
+/// task wired up in `lib.rs` at boot.
+#[tauri::command]
+pub async fn run_turn(state: State<'_, AppState>, args: RunTurnArgs) -> Result<String, String> {
+    let bridge = clone_bridge(&state).await?;
+    let result = bridge
+        .run_turn(RunTurnParams {
+            prompt: args.prompt,
+            model: args.model,
+            ..Default::default()
+        })
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(result.turn_id)
+}
+
+/// Abort an in-flight turn by id.
+#[tauri::command]
+pub async fn abort_turn(state: State<'_, AppState>, turn_id: String) -> Result<(), String> {
+    let bridge = clone_bridge(&state).await?;
+    bridge.abort_turn(turn_id).await.map_err(|e| e.to_string())
+}
+
+/// True once the runner is attached and `run_turn` is callable.
+/// Tauri requires async commands with reference inputs to return a
+/// `Result`; the `Err` arm is unused here in practice.
+#[tauri::command]
+pub async fn runner_ready(state: State<'_, AppState>) -> Result<bool, String> {
+    let slot = state.bridge.clone();
+    let guard = slot.lock().await;
+    Ok(guard.is_some())
 }
