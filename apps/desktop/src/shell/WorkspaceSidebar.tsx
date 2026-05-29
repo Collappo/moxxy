@@ -454,7 +454,8 @@ function ProfilePill(): JSX.Element {
       style={{
         margin: 12,
         padding: '10px 12px',
-        background: 'var(--color-sidebar-bg-active)',
+        background: 'var(--color-sidebar-bg-hover)',
+        border: '1px solid var(--color-sidebar-border)',
         borderRadius: 12,
         display: 'flex',
         alignItems: 'center',

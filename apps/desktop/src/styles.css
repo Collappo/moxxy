@@ -18,13 +18,14 @@
   --color-text-muted:    #475569;
   --color-text-dim:      #94a3b8;
 
-  /* Sidebar — deep navy, anchors the brand-coloured surfaces. */
-  --color-sidebar-bg:        #1f2235;
-  --color-sidebar-bg-hover:  #282c44;
-  --color-sidebar-bg-active: #2e3354;
-  --color-sidebar-text:      #e6e8f3;
-  --color-sidebar-text-dim:  #8087a6;
-  --color-sidebar-border:    #2a2e48;
+  /* Sidebar — pearl white. A hair warmer than the app canvas so the
+   * column reads as separate without a heavy rule. */
+  --color-sidebar-bg:        #fbfcff;
+  --color-sidebar-bg-hover:  #f2f3fa;
+  --color-sidebar-bg-active: #fdf2f8;   /* brand-pink wash for the active row */
+  --color-sidebar-text:      #0f172a;
+  --color-sidebar-text-dim:  #6b7194;
+  --color-sidebar-border:    #e3e5f0;
 
   /* Accents — pink primary (CTA), cyan secondary, emerald success. */
   --color-primary:        #ec4899;   /* hot pink — CTAs, send button, focus glow */
