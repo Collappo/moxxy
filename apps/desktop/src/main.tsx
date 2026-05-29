@@ -17,6 +17,14 @@ const CLERK_KEY = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY;
 // transcript, etc. in a 380x200 surface.
 const isFocus = typeof window !== 'undefined' && window.location.hash === '#focus';
 
+// Tag the body so the focus-only CSS (transparent root, centered
+// dot, etc.) only applies inside the floating widget. Without this,
+// importing focus.css from the shared bundle would yank the main
+// app's layout to the page center.
+if (typeof document !== 'undefined' && isFocus) {
+  document.body.dataset['mode'] = 'focus';
+}
+
 const Tree = isFocus ? (
   <FocusWidget />
 ) : CLERK_KEY ? (

@@ -1,20 +1,21 @@
 /* Focus widget chrome. Transparent BrowserWindow → the page itself
  * draws the rounded card, the shadow, and the drag handle. */
 
-html,
-body,
-#root {
+/* Scope every rule below to body[data-mode='focus'] so this stylesheet
+ * (which is imported from the shared bundle) doesn't bleed into the
+ * main app's layout. */
+
+body[data-mode='focus'],
+body[data-mode='focus'] html,
+body[data-mode='focus'] #root {
   background: transparent !important;
   overflow: hidden;
-  /* The frameless widget's only chrome comes from the inner
-   * mode-specific cards. Force the body's margin/padding off so
-   * the dot floats naked instead of inside an off-white pad. */
   margin: 0;
   padding: 0;
   height: 100%;
   width: 100%;
 }
-#root {
+body[data-mode='focus'] #root {
   display: flex;
   align-items: center;
   justify-content: center;
