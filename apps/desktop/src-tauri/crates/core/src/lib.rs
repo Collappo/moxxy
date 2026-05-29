@@ -23,6 +23,7 @@ pub mod pool;
 pub mod requirements;
 pub mod runner_bridge;
 pub mod schedule;
+pub mod settings;
 pub mod sidecar;
 pub mod transport;
 pub mod windows;

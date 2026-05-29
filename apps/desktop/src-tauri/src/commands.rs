@@ -311,6 +311,117 @@ pub fn schedules_validate_cron(expr: String) -> bool {
     is_basic_valid_cron(&expr)
 }
 
+// ---- Settings (providers + skills) -------------------------------------------
+
+#[tauri::command]
+pub async fn settings_providers_list() -> Vec<moxxy_desktop_core::settings::ProviderConfig> {
+    let path = dirs::home_dir()
+        .map(|h| h.join(".moxxy").join("config.yaml"))
+        .unwrap_or_else(|| std::path::PathBuf::from("config.yaml"));
+    moxxy_desktop_core::settings::read_provider_status(&path).await
+}
+
+/// Hand off an API key to the moxxy vault via the CLI's own `vault set`
+/// command, piping the secret on stdin. The desktop never persists
+/// or logs the value.
+#[tauri::command]
+pub async fn settings_set_api_key(provider: String, secret: String) -> Result<(), String> {
+    use moxxy_desktop_core::requirements::locate_on_path;
+    use moxxy_desktop_core::settings::vault_set_command;
+    use std::process::Stdio;
+    use tokio::io::AsyncWriteExt;
+    use tokio::process::Command;
+
+    // Locate the CLI entry the same way boot does.
+    let cli_entry: std::path::PathBuf = if let Ok(p) = std::env::var("MOXXY_CLI_ENTRY") {
+        p.into()
+    } else if let Some(monorepo) = find_monorepo_cli() {
+        monorepo
+    } else if let Some(bin) = locate_on_path("moxxy") {
+        bin
+    } else {
+        return Err("moxxy CLI not found — run setup first".into());
+    };
+
+    let (program, args) = vault_set_command(&cli_entry, &provider);
+    let mut child = Command::new(program)
+        .args(&args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("spawn vault: {e}"))?;
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin
+            .write_all(secret.as_bytes())
+            .await
+            .map_err(|e| format!("write secret: {e}"))?;
+        // Newline so the CLI's readline-style reader doesn't block.
+        let _ = stdin.write_all(b"\n").await;
+        drop(stdin);
+    }
+    let status = child.wait().await.map_err(|e| format!("wait: {e}"))?;
+    if !status.success() {
+        return Err(format!("vault set exited {}", status.code().unwrap_or(-1)));
+    }
+    Ok(())
+}
+
+fn find_monorepo_cli() -> Option<std::path::PathBuf> {
+    let mut p = std::env::current_dir().ok()?;
+    loop {
+        let candidate = p.join("packages").join("cli").join("dist").join("bin.js");
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+        p = p.parent()?.to_path_buf();
+    }
+}
+
+#[tauri::command]
+pub async fn settings_skills_list() -> Result<Vec<String>, String> {
+    let dir = dirs::home_dir()
+        .map(|h| h.join(".moxxy").join("skills"))
+        .ok_or_else(|| "no home directory".to_string())?;
+    let mut entries = tokio::fs::read_dir(&dir).await.map_err(|e| e.to_string())?;
+    let mut names = Vec::new();
+    while let Some(entry) = entries.next_entry().await.map_err(|e| e.to_string())? {
+        if entry.file_name().to_string_lossy().ends_with(".md") {
+            names.push(entry.file_name().to_string_lossy().into_owned());
+        }
+    }
+    names.sort();
+    Ok(names)
+}
+
+#[tauri::command]
+pub async fn settings_skill_read(name: String) -> Result<String, String> {
+    let dir = dirs::home_dir()
+        .map(|h| h.join(".moxxy").join("skills"))
+        .ok_or_else(|| "no home directory".to_string())?;
+    // Disallow path traversal.
+    if name.contains('/') || name.contains("..") {
+        return Err("invalid skill name".into());
+    }
+    let path = dir.join(&name);
+    tokio::fs::read_to_string(&path)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn settings_skill_write(name: String, body: String) -> Result<(), String> {
+    let dir = dirs::home_dir()
+        .map(|h| h.join(".moxxy").join("skills"))
+        .ok_or_else(|| "no home directory".to_string())?;
+    if name.contains('/') || name.contains("..") {
+        return Err("invalid skill name".into());
+    }
+    tokio::fs::create_dir_all(&dir).await.map_err(|e| e.to_string())?;
+    let path = dir.join(&name);
+    tokio::fs::write(&path, body).await.map_err(|e| e.to_string())
+}
+
 // ---- Requirements / onboarding ----------------------------------------------
 
 /// Probe the system for Node, the moxxy CLI, and provider config.

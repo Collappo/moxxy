@@ -8,9 +8,10 @@ import { isMainWindow } from './lib/window-context';
 import { DeskSidebar } from './desks/desk-sidebar';
 import { Composer, Transcript } from './chat';
 import { SchedulePanel } from './schedules';
+import { SettingsPanel } from './settings';
 import { RequirementsScreen } from './requirements';
 
-type View = 'chat' | 'schedules';
+type View = 'chat' | 'schedules' | 'settings';
 
 export function App(): JSX.Element {
   const status = useSidecarStatus();
@@ -87,8 +88,10 @@ export function App(): JSX.Element {
             />
             {session.error && <ErrorBanner message={session.error} />}
           </>
-        ) : (
+        ) : view === 'schedules' ? (
           <SchedulePanel />
+        ) : (
+          <SettingsPanel />
         )}
       </main>
     </div>
@@ -147,6 +150,7 @@ function ViewSwitcher({
       </header>
       {item('chat', '◇ Chat')}
       {item('schedules', '⏱ Schedules')}
+      {item('settings', '⚙ Settings')}
     </nav>
   );
 }

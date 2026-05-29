@@ -19,6 +19,8 @@ use moxxy_desktop_core::windows::{JsonWindowPinStore, WindowId, WindowPinStore};
 
 #[cfg(not(test))]
 use moxxy_desktop_core::pool::{NodeRunnerPool, NodeRunnerPoolConfig};
+#[cfg(not(test))]
+use tauri::Manager;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -36,7 +38,7 @@ pub struct AppState {
 impl AppState {
     #[cfg(not(test))]
     pub fn production<R: tauri::Runtime>(
-        _app: &tauri::AppHandle<R>,
+        app: &tauri::AppHandle<R>,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         let home = dirs::home_dir().ok_or("home dir unavailable")?;
         let moxxy_dir = home.join(".moxxy");
@@ -48,7 +50,7 @@ impl AppState {
         let schedules =
             Arc::new(JsonScheduleStore::at(moxxy_dir.join("schedules.json")));
 
-        let cli_entry = resolve_cli_entry();
+        let cli_entry = resolve_cli_entry(app);
         let primary_socket = std::env::var("MOXXY_RUNNER_SOCKET")
             .unwrap_or_else(|_| moxxy_dir.join("serve.sock").to_string_lossy().into_owned());
 
@@ -138,22 +140,33 @@ impl AppState {
 /// Resolve the moxxy CLI's `bin.js` location. Search order:
 ///
 ///   1. `MOXXY_CLI_ENTRY` env var — explicit override, always wins.
-///   2. The monorepo dev build at `<repo>/packages/cli/dist/bin.js`,
+///   2. The bundled resource shipped inside the app
+///      (`<resources>/moxxy-cli/bin.js`) — what production installs use.
+///   3. The monorepo dev build at `<repo>/packages/cli/dist/bin.js`,
 ///      walking up from the binary's cwd. Lets `pnpm tauri:dev` work
 ///      out of the box.
-///   3. The bundled resource path next to the binary (production —
-///      not yet wired; will land with Phase 9 packaging).
 ///   4. A bare `moxxy` on `PATH`, expected to forward to `bin.js`.
 ///
-/// Returns the first candidate that exists, or — if nothing's found —
-/// the env value (so the eventual spawn failure message points at the
-/// most useful place for the user to look).
+/// Returns the first candidate that exists, or a placeholder so the
+/// eventual spawn failure message points at the most useful place.
 #[cfg(not(test))]
-fn resolve_cli_entry() -> String {
+fn resolve_cli_entry<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> String {
     use std::path::PathBuf;
 
     if let Ok(v) = std::env::var("MOXXY_CLI_ENTRY") {
         return v;
+    }
+
+    // Tauri resource path — populated by `pnpm bundle-cli` during the
+    // build. In a packaged app this points at the on-disk install.
+    if let Ok(resource_dir) = app.path().resource_dir() {
+        let candidate = resource_dir
+            .join("moxxy-cli")
+            .join("bin.js");
+        if candidate.is_file() {
+            tracing::info!(path = %candidate.display(), "resolved bundled CLI");
+            return candidate.to_string_lossy().into_owned();
+        }
     }
 
     // Walk up looking for `packages/cli/dist/bin.js`.

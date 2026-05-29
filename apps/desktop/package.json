@@ -18,7 +18,9 @@
     "test:e2e": "playwright test",
     "test:rust": "cd src-tauri && cargo test -p moxxy-desktop-core",
     "check:rust": "cd src-tauri && cargo check -p moxxy-desktop-core --all-targets",
-    "clean": "rm -rf dist .turbo node_modules/.vite src-tauri/target"
+    "bundle-cli": "node scripts/bundle-cli.mjs",
+    "prebuild": "pnpm bundle-cli && pnpm build",
+    "clean": "rm -rf dist .turbo node_modules/.vite src-tauri/target src-tauri/resources"
   },
   "dependencies": {
     "@moxxy/ui-tokens": "workspace:*",
