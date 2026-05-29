@@ -387,14 +387,16 @@ function MiniVoice({
 }
 
 // ---- SpectroBackground ---------------------------------------------------
-// Beautiful music-visualizer style: glowing frequency bars rising
-// from the BOTTOM of the panel. Each bar maps to one frequency band,
-// is filled with a vertical pink → fuchsia → violet gradient (moxxy
-// brand), gets a rounded cap, and is haloed by a strong canvas
-// shadowBlur for the live-glow look popular on music-app
-// visualisers (Spotify Wrapped, Apple Music animated artwork, etc).
+// Wave-fill visualiser: a smooth curve traces the audio spectrum
+// across the bottom of the panel, the area below the curve is
+// filled with the moxxy gradient, the whole canvas is heavily
+// blurred for a "music-app artwork" cloud-of-colour look.
+//
+// Two layered waves sample the same FFT data slightly differently
+// (one slow + smoothed, one faster) and are blended with 'screen'
+// composite so they fuse into a single shifting cloud.
 
-const SPECTRO_BARS = 44;
+const SPECTRO_POINTS = 32;
 
 function SpectroBackground({
   analyser,
@@ -402,9 +404,10 @@ function SpectroBackground({
   readonly analyser: AnalyserNode;
 }): JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  // EMA smoothing per bar — the raw FFT data is noisy and a hard
-  // mapping looks like jitter. Smoothing makes the bars breathe.
-  const smoothedRef = useRef<number[]>(new Array(SPECTRO_BARS).fill(0));
+  // Two EMA-smoothed sample buffers — drives the two layered waves
+  // we draw each frame.
+  const slowRef = useRef<number[]>(new Array(SPECTRO_POINTS).fill(0));
+  const fastRef = useRef<number[]>(new Array(SPECTRO_POINTS).fill(0));
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -429,77 +432,91 @@ function SpectroBackground({
     const ro = new ResizeObserver(sizeCanvas);
     ro.observe(canvas);
 
+    const sampleAmplitudes = (): { slow: number[]; fast: number[] } => {
+      // Log-ish frequency bucketing — voice energy concentrates in
+      // the low end, so weight the bins accordingly.
+      const useableBins = Math.min(bufferLength, 256);
+      const slow = slowRef.current;
+      const fast = fastRef.current;
+      for (let i = 0; i < SPECTRO_POINTS; i++) {
+        const t = i / SPECTRO_POINTS;
+        const start = Math.floor(Math.pow(t, 1.4) * useableBins);
+        const end = Math.floor(
+          Math.pow((i + 1) / SPECTRO_POINTS, 1.4) * useableBins,
+        );
+        let sum = 0;
+        const count = Math.max(1, end - start);
+        for (let j = start; j < end; j++) sum += data[j] ?? 0;
+        const amp = sum / count / 255;
+        // Slow wave: heavy smoothing, lazy breathing.
+        slow[i] = (slow[i] ?? 0) * 0.9 + amp * 0.1;
+        // Fast wave: shorter EMA, reacts more to transients.
+        fast[i] = (fast[i] ?? 0) * 0.7 + amp * 0.3;
+      }
+      return { slow, fast };
+    };
+
+    const drawWave = (
+      ctx2: CanvasRenderingContext2D,
+      points: ReadonlyArray<number>,
+      w: number,
+      h: number,
+      heightFraction: number,
+      gradientStops: ReadonlyArray<[number, string]>,
+    ): void => {
+      const maxH = h * heightFraction;
+      // Wave rises FROM the bottom UP. y = bottom - amplitude.
+      const xs: number[] = [];
+      const ys: number[] = [];
+      for (let i = 0; i < SPECTRO_POINTS; i++) {
+        xs.push((i / (SPECTRO_POINTS - 1)) * w);
+        ys.push(h - Math.max(2, (points[i] ?? 0) * maxH));
+      }
+
+      ctx2.beginPath();
+      ctx2.moveTo(0, h);
+      ctx2.lineTo(xs[0]!, ys[0]!);
+      // Smooth bezier between sample points using midpoints as
+      // anchor + sample points as control. Produces a continuous
+      // wavy curve.
+      for (let i = 0; i < SPECTRO_POINTS - 1; i++) {
+        const cx = (xs[i]! + xs[i + 1]!) / 2;
+        const cy = (ys[i]! + ys[i + 1]!) / 2;
+        ctx2.quadraticCurveTo(xs[i]!, ys[i]!, cx, cy);
+      }
+      ctx2.lineTo(xs[SPECTRO_POINTS - 1]!, ys[SPECTRO_POINTS - 1]!);
+      ctx2.lineTo(w, h);
+      ctx2.closePath();
+
+      const grad = ctx2.createLinearGradient(0, 0, 0, h);
+      for (const [stop, color] of gradientStops) grad.addColorStop(stop, color);
+      ctx2.fillStyle = grad;
+      ctx2.fill();
+    };
+
     const draw = (): void => {
       raf = requestAnimationFrame(draw);
       analyser.getByteFrequencyData(data);
       const w = canvas.clientWidth;
       const h = canvas.clientHeight;
       if (w === 0 || h === 0) return;
-
-      // Logarithmic-ish bin mapping: low frequencies get fewer bins
-      // (they matter more for voice), high frequencies are grouped
-      // into wider bars. Produces a more musical visualisation than
-      // a flat linear split where the high end dominates the bar
-      // count but carries no information for speech.
-      const smoothed = smoothedRef.current;
-      const useableBins = Math.min(bufferLength, 256);
-      for (let i = 0; i < SPECTRO_BARS; i++) {
-        const t = i / SPECTRO_BARS;
-        const start = Math.floor(Math.pow(t, 1.5) * useableBins);
-        const end = Math.floor(Math.pow((i + 1) / SPECTRO_BARS, 1.5) * useableBins);
-        let sum = 0;
-        const count = Math.max(1, end - start);
-        for (let j = start; j < end; j++) sum += data[j] ?? 0;
-        const amp = sum / count / 255;
-        // EMA with a slow attack so quiet moments settle gently,
-        // not pop down.
-        smoothed[i] = (smoothed[i] ?? 0) * 0.82 + amp * 0.18;
-      }
-
+      const { slow, fast } = sampleAmplitudes();
       ctx.clearRect(0, 0, w, h);
-
-      const gap = 2;
-      const totalGap = gap * (SPECTRO_BARS - 1);
-      const barW = Math.max(1, (w - totalGap) / SPECTRO_BARS);
-      const maxBarH = h * 0.85;
-      // Minimum visible height even at silence — gives the bars an
-      // idle "alive" presence instead of vanishing entirely.
-      const minBarH = Math.max(3, h * 0.06);
-
-      // Glow effect: canvas shadowBlur paints a soft pink halo
-      // around every bar — the signature look of music
-      // visualisers.
-      ctx.shadowColor = 'rgba(236, 72, 153, 0.55)';
-      ctx.shadowBlur = 14;
-
-      for (let i = 0; i < SPECTRO_BARS; i++) {
-        const amp = smoothed[i] ?? 0;
-        const barH = Math.max(minBarH, amp * maxBarH);
-        const x = i * (barW + gap);
-        const y = h - barH;
-
-        // Vertical gradient per bar — fuchsia at top, pink at base.
-        const grad = ctx.createLinearGradient(0, y, 0, h);
-        grad.addColorStop(0, 'rgba(217, 70, 239, 0.95)');
-        grad.addColorStop(0.55, 'rgba(236, 72, 153, 0.95)');
-        grad.addColorStop(1, 'rgba(244, 114, 182, 0.85)');
-        ctx.fillStyle = grad;
-
-        // Rounded-rect helper. We round the top so the bar looks
-        // like a cap rather than a hard rectangle.
-        const r = Math.min(barW / 2, 3);
-        ctx.beginPath();
-        ctx.moveTo(x + r, y);
-        ctx.lineTo(x + barW - r, y);
-        ctx.quadraticCurveTo(x + barW, y, x + barW, y + r);
-        ctx.lineTo(x + barW, h);
-        ctx.lineTo(x, h);
-        ctx.lineTo(x, y + r);
-        ctx.quadraticCurveTo(x, y, x + r, y);
-        ctx.closePath();
-        ctx.fill();
-      }
-      ctx.shadowBlur = 0;
+      // Two layered waves, additively blended into a single dreamy
+      // colour cloud.
+      ctx.globalCompositeOperation = 'screen';
+      drawWave(ctx, slow, w, h, 0.95, [
+        [0, 'rgba(217, 70, 239, 0.0)'],
+        [0.35, 'rgba(217, 70, 239, 0.45)'],
+        [0.75, 'rgba(236, 72, 153, 0.7)'],
+        [1, 'rgba(244, 114, 182, 0.9)'],
+      ]);
+      drawWave(ctx, fast, w, h, 0.7, [
+        [0, 'rgba(167, 139, 250, 0)'],
+        [0.5, 'rgba(167, 139, 250, 0.5)'],
+        [1, 'rgba(236, 72, 153, 0.85)'],
+      ]);
+      ctx.globalCompositeOperation = 'source-over';
     };
     draw();
     return () => {
@@ -519,10 +536,12 @@ function SpectroBackground({
         height: '100%',
         zIndex: 0,
         pointerEvents: 'none',
-        // Subtle blur softens the bars into a continuous flowing
-        // visualisation while keeping the shape recognisable.
-        filter: 'blur(2px) saturate(1.15)',
-        WebkitFilter: 'blur(2px) saturate(1.15)',
+        // Strong blur turns the layered waves into a glowing
+        // continuous cloud that moves with the audio. Saturate
+        // pushes the moxxy pinks/violets so they pop against the
+        // white panel.
+        filter: 'blur(14px) saturate(1.2)',
+        WebkitFilter: 'blur(14px) saturate(1.2)',
       }}
     />
   );
