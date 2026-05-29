@@ -22,6 +22,7 @@
     "@types/node": "catalog:",
     "dependency-cruiser": "^16.0.0",
     "eslint": "^9.18.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
     "tsx": "catalog:",
     "turbo": "^2.5.0",
     "typescript": "catalog:",
