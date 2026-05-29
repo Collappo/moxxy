@@ -64,8 +64,12 @@
       "icon": "public/logo.png"
     },
     "linux": {
-      "target": "AppImage",
+      "target": [
+        "deb",
+        "AppImage"
+      ],
       "category": "Utility",
+      "maintainer": "MoxxyAI <noreply@moxxy.ai>",
       "icon": "public/logo.png"
     },
     "win": {
