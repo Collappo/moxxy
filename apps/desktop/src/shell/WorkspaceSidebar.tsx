@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useClerk, useUser } from '@clerk/clerk-react';
+import { useAuth, useClerk, useUser } from '@clerk/clerk-react';
 import { useDesks } from '@/lib/useDesks';
 import { Skeleton } from '@/lib/Skeleton';
 import { Icon } from '@/lib/Icon';
@@ -485,6 +485,7 @@ function ProfilePill(): JSX.Element {
   // mounted (no publishable key configured), so we can call them
   // unconditionally and fall back to prefs / Guest.
   const { user, isLoaded } = useUser();
+  const { sessionClaims } = useAuth();
   const { signOut } = useClerk();
   const { prefs, update } = usePrefs();
   const [busy, setBusy] = useState(false);
@@ -496,11 +497,19 @@ function ProfilePill(): JSX.Element {
     user?.username ??
     prefs?.clerkDisplayName ??
     (signedIn ? 'Signed in' : 'Guest');
-  // Clerk's `publicMetadata` is server-set and readable on the client
-  // — the right slot for an `accountType` tier. Free is the implicit
-  // default for unauthenticated and unset users.
+  // Account tier — try every place a client legitimately can read it:
+  //   1. publicMetadata.accountType         (server-set, client-readable)
+  //   2. session-token claim "accountType"  (recommended for private
+  //      data — configure under Sessions → Customize session token)
+  //   3. unsafeMetadata.accountType         (client-writable, last resort)
+  // privateMetadata is server-only by Clerk's design and never reaches
+  // the renderer.
+  const claims = (sessionClaims ?? {}) as Record<string, unknown>;
   const tier = formatTier(
-    (user?.publicMetadata as Record<string, unknown> | undefined)?.accountType,
+    (user?.publicMetadata as Record<string, unknown> | undefined)?.accountType ??
+      claims['accountType'] ??
+      claims['account_type'] ??
+      (user?.unsafeMetadata as Record<string, unknown> | undefined)?.accountType,
   );
   const initials = signedIn
     ? (displayName.match(/\b\w/g) ?? [displayName[0] ?? 'U'])
