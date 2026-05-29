@@ -7,6 +7,11 @@ import {
 } from 'react';
 import { Icon } from '@/lib/Icon';
 import { api } from '@/lib/api';
+import {
+  audioToPcm16,
+  uint8ArrayToBase64,
+  MOXXY_PCM16_24KHZ_MIME,
+} from '@/lib/audioToPcm16';
 import { useQueuedTurns } from '@/lib/useChat';
 import { chatStore } from '@/lib/chatStore';
 import { AgentPicker } from './AgentPicker';
@@ -354,11 +359,14 @@ async function finalizeRecording(
   setVoice({ kind: 'transcribing' });
   try {
     const blob = new Blob([...chunks], { type: mimeType });
-    const buf = await blob.arrayBuffer();
-    const audioBase64 = arrayBufferToBase64(buf);
+    // Convert to PCM16 mono 24 kHz — the format moxxy's Codex
+    // transcriber expects. Same role ffmpeg plays in the TUI's
+    // voice path; AudioContext does it inline here without the
+    // ffmpeg dependency.
+    const pcm = await audioToPcm16(blob);
     const text = await api().invoke('session.transcribe', {
-      audioBase64,
-      mimeType,
+      audioBase64: uint8ArrayToBase64(pcm),
+      mimeType: MOXXY_PCM16_24KHZ_MIME,
     });
     if (text?.trim()) {
       setDraft((d) => (d ? `${d.trimEnd()} ${text.trim()}` : text.trim()));
@@ -371,15 +379,6 @@ async function finalizeRecording(
     });
     setTimeout(() => setVoice({ kind: 'idle' }), 2500);
   }
-}
-
-function arrayBufferToBase64(buf: ArrayBuffer): string {
-  const bytes = new Uint8Array(buf);
-  let binary = '';
-  for (let i = 0; i < bytes.byteLength; i++) {
-    binary += String.fromCharCode(bytes[i]!);
-  }
-  return btoa(binary);
 }
 
 function ToolChip({

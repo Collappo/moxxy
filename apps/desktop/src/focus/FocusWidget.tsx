@@ -25,6 +25,11 @@ import { api } from '@/lib/api';
 import { ChatStoreBridge, useChat } from '@/lib/useChat';
 import { chatStore } from '@/lib/chatStore';
 import { ConnectionBridge, useActiveWorkspaceId } from '@/lib/useConnection';
+import {
+  audioToPcm16,
+  uint8ArrayToBase64,
+  MOXXY_PCM16_24KHZ_MIME,
+} from '@/lib/audioToPcm16';
 
 type Stage = 'inactive' | 'active' | 'mini-text';
 
@@ -157,10 +162,12 @@ function Active({
     setPhase('transcribing');
     try {
       const blob = new Blob([...chunks], { type: mimeType });
-      const buf = await blob.arrayBuffer();
+      // Convert to PCM16 mono 24 kHz (the format moxxy's Codex
+      // transcriber expects). Mirrors the TUI's ffmpeg conversion.
+      const pcm = await audioToPcm16(blob);
       const text = await api().invoke('session.transcribe', {
-        audioBase64: arrayBufferToBase64(buf),
-        mimeType,
+        audioBase64: uint8ArrayToBase64(pcm),
+        mimeType: MOXXY_PCM16_24KHZ_MIME,
       });
       if (text?.trim() && workspaceId) {
         // Send straight as a turn — the visualiser snaps back to
@@ -748,16 +755,7 @@ function SendIcon(): JSX.Element {
   );
 }
 
-// ---- Utilities -----------------------------------------------------------
-
-function arrayBufferToBase64(buf: ArrayBuffer): string {
-  const bytes = new Uint8Array(buf);
-  let binary = '';
-  for (let i = 0; i < bytes.byteLength; i++) {
-    binary += String.fromCharCode(bytes[i]!);
-  }
-  return btoa(binary);
-}
+// audioToPcm16 / uint8ArrayToBase64 live in @/lib/audioToPcm16.
 
 // ---- Styles --------------------------------------------------------------
 // Inline. Flat. Sharp-cornered. No transitions on the things that
