@@ -21,13 +21,7 @@
  */
 
 import { useEffect, useState } from 'react';
-import {
-  ClerkProvider,
-  SignedIn,
-  SignedOut,
-  SignIn,
-  useUser,
-} from '@clerk/clerk-react';
+import { SignedIn, SignedOut, SignIn, useUser } from '@clerk/clerk-react';
 import { api } from '@/lib/api';
 import { usePrefs } from '@/lib/usePrefs';
 import { useDesks } from '@/lib/useDesks';
@@ -72,16 +66,9 @@ export function FirstRunWizard({ onComplete }: Props): JSX.Element {
     </Shell>
   );
 
-  // ClerkProvider wraps the wizard so SignIn / useUser have access to
-  // the Clerk client. Without a publishable key we skip the provider
-  // and AuthStep falls back to a "local mode" message.
-  if (CLERK_KEY) {
-    return (
-      <ClerkProvider publishableKey={CLERK_KEY} appearance={brandedClerkAppearance}>
-        {content}
-      </ClerkProvider>
-    );
-  }
+  // ClerkProvider lives at the very top of the tree (main.tsx) so any
+  // component can use Clerk hooks. The brandedClerkAppearance prop is
+  // forwarded via <SignIn appearance={…}/> in the auth step below.
   return content;
 }
 
@@ -456,7 +443,11 @@ function AuthStep({
     <StepCard title="Sign in" sub="So your settings sync across machines.">
       <SignedOut>
         <div style={authCardStyle}>
-          <SignIn routing="virtual" forceRedirectUrl="#" />
+          <SignIn
+            routing="virtual"
+            forceRedirectUrl="#"
+            appearance={brandedClerkAppearance}
+          />
         </div>
       </SignedOut>
       <SignedIn>

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useClerk, useUser } from '@clerk/clerk-react';
 import { useDesks } from '@/lib/useDesks';
 import { Skeleton } from '@/lib/Skeleton';
 import { Icon } from '@/lib/Icon';
@@ -6,6 +7,16 @@ import { Modal, ConfirmModal } from '@/lib/Modal';
 import { useUnreadWorkspaces } from '@/lib/useChat';
 import { usePrefs } from '@/lib/usePrefs';
 import type { Desk } from '@shared/ipc';
+
+/** Format an accountType value for display. Free-tier is the default
+ *  when the publicMetadata field is missing. */
+function formatTier(raw: unknown): string {
+  if (typeof raw === 'string' && raw.trim().length > 0) {
+    const t = raw.trim().toLowerCase();
+    return t.charAt(0).toUpperCase() + t.slice(1);
+  }
+  return 'Free';
+}
 
 export type View = 'chat' | 'workflows' | 'settings';
 
@@ -450,19 +461,48 @@ function WorkspaceRow({
 }
 
 function ProfilePill(): JSX.Element {
-  const { prefs } = usePrefs();
-  const signedIn = !!prefs?.clerkUserId;
-  const displayName = prefs?.clerkDisplayName?.trim() || (signedIn ? 'Signed in' : 'Guest');
-  const subtitle = signedIn ? 'Signed in' : 'Not signed in';
-  // Two initials from display name when available, else "G" for guest.
+  // Both Clerk hooks return safe defaults when the provider isn't
+  // mounted (no publishable key configured), so we can call them
+  // unconditionally and fall back to prefs / Guest.
+  const { user, isLoaded } = useUser();
+  const { signOut } = useClerk();
+  const { prefs, update } = usePrefs();
+  const [busy, setBusy] = useState(false);
+
+  const signedIn = !!user;
+  const displayName =
+    user?.fullName ??
+    user?.primaryEmailAddress?.emailAddress ??
+    user?.username ??
+    prefs?.clerkDisplayName ??
+    (signedIn ? 'Signed in' : 'Guest');
+  // Clerk's `publicMetadata` is server-set and readable on the client
+  // — the right slot for an `accountType` tier. Free is the implicit
+  // default for unauthenticated and unset users.
+  const tier = formatTier(
+    (user?.publicMetadata as Record<string, unknown> | undefined)?.accountType,
+  );
   const initials = signedIn
-    ? displayName
-        .split(/\s+/)
-        .filter(Boolean)
+    ? (displayName.match(/\b\w/g) ?? [displayName[0] ?? 'U'])
         .slice(0, 2)
-        .map((p) => p[0]!.toUpperCase())
-        .join('') || displayName[0]!.toUpperCase()
+        .join('')
+        .toUpperCase()
     : 'G';
+
+  const onSignOut = async (): Promise<void> => {
+    setBusy(true);
+    try {
+      await signOut();
+      await update({
+        clerkUserId: null,
+        clerkDisplayName: null,
+        signedInAt: null,
+      });
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <div
       style={{
@@ -492,6 +532,7 @@ function ProfilePill(): JSX.Element {
           fontWeight: 700,
           fontSize: 11.5,
           letterSpacing: '0.04em',
+          flexShrink: 0,
         }}
       >
         {initials}
@@ -510,10 +551,59 @@ function ProfilePill(): JSX.Element {
         >
           {displayName}
         </div>
-        <div style={{ fontSize: 10.5, color: 'var(--color-sidebar-text-dim)' }}>
-          {subtitle}
+        <div
+          style={{
+            fontSize: 10.5,
+            color: 'var(--color-sidebar-text-dim)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+          }}
+        >
+          <span
+            style={{
+              padding: '1px 6px',
+              borderRadius: 999,
+              background: signedIn
+                ? 'rgba(236, 72, 153, 0.18)'
+                : 'rgba(148, 163, 184, 0.22)',
+              color: signedIn ? '#fce7f3' : 'var(--color-sidebar-text-dim)',
+              fontWeight: 700,
+              letterSpacing: '0.04em',
+              textTransform: 'uppercase',
+              fontSize: 9.5,
+            }}
+          >
+            {tier}
+          </span>
+          <span>{!isLoaded ? '…' : signedIn ? 'Signed in' : 'Not signed in'}</span>
         </div>
       </div>
+      {signedIn && (
+        <button
+          type="button"
+          aria-label="Sign out"
+          title="Sign out"
+          disabled={busy}
+          onClick={() => void onSignOut()}
+          style={{
+            width: 28,
+            height: 28,
+            borderRadius: 8,
+            color: 'var(--color-sidebar-text-dim)',
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            opacity: busy ? 0.4 : 1,
+          }}
+          onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--color-text)')}
+          onMouseLeave={(e) =>
+            (e.currentTarget.style.color = 'var(--color-sidebar-text-dim)')
+          }
+        >
+          <Icon name="x" size={14} />
+        </button>
+      )}
     </div>
   );
 }
