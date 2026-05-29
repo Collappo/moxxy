@@ -47,28 +47,46 @@ export function closeFocusWindow(): void {
  *  open. */
 /** Pin the bottom-right corner so resizes feel anchored to the
  *  screen corner instead of sliding the window around. */
+/** Resize the widget while keeping it visually anchored to its current
+ *  spot. Anchor rule:
+ *
+ *    - If the widget sits in the bottom-right corner (within 80 px of
+ *      the work-area edges) → pin its bottom-right corner. This is
+ *      the default spawn position so collapses/expands snap nicely.
+ *    - Otherwise → pin the widget's *centre*. Pinning a corner when
+ *      the user has dragged the widget into the middle of the screen
+ *      causes the jarring "it flew sideways" behaviour the user
+ *      reported on expand / collapse. */
 export function resizeFocusWindow(width: number, height: number): void {
   if (!focusWindow || focusWindow.isDestroyed()) return;
   const work = screen.getPrimaryDisplay().workArea;
   const margin = 24;
   const [prevW = 0, prevH = 0] = focusWindow.getSize();
   const [prevX = 0, prevY = 0] = focusWindow.getPosition();
-  const snapBottomRight =
+
+  const inBottomRightZone =
     Math.abs(prevX + prevW - (work.x + work.width)) < 80 &&
     Math.abs(prevY + prevH - (work.y + work.height)) < 80;
-  focusWindow.setBounds(
-    {
-      x: snapBottomRight
-        ? work.x + work.width - width - margin
-        : prevX + (prevW - width),
-      y: snapBottomRight
-        ? work.y + work.height - height - margin
-        : prevY + (prevH - height),
-      width,
-      height,
-    },
-    true,
-  );
+
+  let nextX: number;
+  let nextY: number;
+  if (inBottomRightZone) {
+    nextX = work.x + work.width - width - margin;
+    nextY = work.y + work.height - height - margin;
+  } else {
+    // Pin the centre of the previous bounds to the centre of the new
+    // bounds so the user's eyes follow the widget naturally.
+    const cx = prevX + prevW / 2;
+    const cy = prevY + prevH / 2;
+    nextX = Math.round(cx - width / 2);
+    nextY = Math.round(cy - height / 2);
+  }
+
+  // Clamp so we never end up off-screen after a resize.
+  nextX = Math.max(work.x + 4, Math.min(nextX, work.x + work.width - width - 4));
+  nextY = Math.max(work.y + 4, Math.min(nextY, work.y + work.height - height - 4));
+
+  focusWindow.setBounds({ x: nextX, y: nextY, width, height }, true);
 }
 
 export async function showFocusWindow(opts: CreateOpts): Promise<void> {

@@ -40,7 +40,6 @@ export function Splash({
         style={{
           width: 160,
           height: 160,
-          imageRendering: 'pixelated',
         }}
       />
       <p
