@@ -136,12 +136,24 @@ async function createWindow(): Promise<void> {
   // Tray menu — toggle the widget, restore the main window, quit.
   if (!trayInstance) {
     try {
-      const iconPath = isDev
+      const trayIconPath = isDev
         ? path.join(__dirname, '..', '..', '..', 'public', 'logo.png')
         : path.join(__dirname, '..', '..', 'dist', 'logo.png');
-      const icon = nativeImage.createFromPath(iconPath).resize({ width: 18, height: 18 });
-      if (process.platform === 'darwin') icon.setTemplateImage(false);
+      // Render at 22×22 which is the macOS menu-bar standard
+      // (scales cleanly to 44×44 on retina). 18 was too small to be
+      // recognisable on a busy menu bar.
+      const raw = nativeImage.createFromPath(trayIconPath);
+      const icon = raw.isEmpty()
+        ? nativeImage.createEmpty()
+        : raw.resize({ width: 22, height: 22, quality: 'best' });
+      if (raw.isEmpty()) {
+        // eslint-disable-next-line no-console
+        console.warn(`[moxxy] tray icon source missing or unreadable: ${trayIconPath}`);
+      }
       trayInstance = new Tray(icon);
+      // Text label so the tray is *always* visible, even if the
+      // icon failed to load or the user's menu bar is busy.
+      trayInstance.setTitle(' moxxy');
       trayInstance.setToolTip('MoxxyAI Workspaces');
       const openMainAndCloseFocus = (): void => {
         closeFocusWindow();
@@ -162,8 +174,12 @@ async function createWindow(): Promise<void> {
         ]),
       );
       trayInstance.on('click', () => void toggleFocusWindow(focusOpts));
-    } catch {
-      /* tray failure is non-fatal */
+    } catch (err) {
+      // Surface the failure — silent catch was hiding "icon missing"
+      // and "Tray() blew up" alike, leaving the user with no menubar
+      // affordance.
+      // eslint-disable-next-line no-console
+      console.error('[moxxy] tray init failed:', err);
     }
   }
 
