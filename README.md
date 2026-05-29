@@ -267,6 +267,10 @@ export default defineConfig({
 @moxxy/cli                          ← the `moxxy` binary
 @moxxy/config                       ← defineConfig + moxxy.config.ts loader
 @moxxy/testing                      ← FakeProvider + record/replay harness
+@moxxy/chat-model                   ← UI-neutral chat model (event→block fold + markdown AST + chunked log); shared by the TUI and desktop
+apps/desktop                        ← Electron desktop app (attaches to @moxxy/runner)
+@moxxy/desktop-ipc-contract         ← typed desktop IPC boundary (channels + payloads + Zod validation)
+@moxxy/desktop-host                 ← desktop Electron main process (runner pool/supervisor, IPC, NDJSON chat log, security)
 ```
 
 The hard invariant: `@moxxy/sdk` has zero internal deps; `@moxxy/core` doesn't import any plugin. Enforced in CI via `pnpm check:deps`.
