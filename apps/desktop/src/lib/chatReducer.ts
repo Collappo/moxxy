@@ -26,6 +26,11 @@ export type Block =
       output?: unknown;
       error?: string;
     }
+  /** A skill activation. Carries enough structure for the Transcript
+   *  to group the surrounding load_skill tool + subsequent tool calls
+   *  under one SkillGroupView. Rendered as a fallback compact system
+   *  note when the grouping logic can't pair it with anything. */
+  | { kind: 'skill_marker'; id: string; name: string; reason: string }
   | { kind: 'system'; id: string; text: string; tone: 'info' | 'error' };
 
 export interface ChatState {
@@ -194,10 +199,10 @@ function apply(state: ChatState, event: MoxxyEvent): ChatState {
     }
     case 'skill_invoked': {
       const block: Block = {
-        kind: 'system',
-        id: `s-${state.seq}`,
-        text: `skill ${event.name} (${event.reason.replace(/_/g, ' ')})`,
-        tone: 'info',
+        kind: 'skill_marker',
+        id: `sk-${state.seq}`,
+        name: event.name,
+        reason: event.reason,
       };
       return {
         ...state,

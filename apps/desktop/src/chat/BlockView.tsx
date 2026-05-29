@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import type { Block } from '@/lib/useChat';
 import { Icon } from '@/lib/Icon';
 import { MarkdownBody } from './MarkdownBody';
@@ -169,9 +170,16 @@ function Header({ streaming }: { readonly streaming: boolean }): JSX.Element {
 }
 
 function ActionRow({ text }: { readonly text: string }): JSX.Element {
+  // Two-stage feedback: flash a green check that fades out, plus a
+  // "Copied" pill so the change is visible whether the user is staring
+  // at the icon or at the row text.
+  const [copied, setCopied] = useState(false);
+
   const onCopy = async (): Promise<void> => {
     try {
       await navigator.clipboard.writeText(text);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
     } catch {
       /* swallow; rare on Electron */
     }
@@ -181,13 +189,67 @@ function ActionRow({ text }: { readonly text: string }): JSX.Element {
       style={{
         marginTop: 10,
         display: 'flex',
-        gap: 2,
+        alignItems: 'center',
+        gap: 6,
         color: 'var(--color-text-dim)',
       }}
     >
-      <IconBtn label="Copy" onClick={() => void onCopy()}>
-        <Icon name="copy" size={15} />
+      <IconBtn
+        label={copied ? 'Copied!' : 'Copy'}
+        onClick={() => void onCopy()}
+      >
+        {/* Cross-fade between the copy + check icons inside the button
+         *  so the swap reads as state, not flicker. */}
+        <span
+          aria-hidden
+          style={{
+            position: 'relative',
+            display: 'inline-flex',
+            width: 15,
+            height: 15,
+          }}
+        >
+          <Icon
+            name="copy"
+            size={15}
+            style={{
+              position: 'absolute',
+              inset: 0,
+              opacity: copied ? 0 : 1,
+              transition: 'opacity 140ms ease, transform 200ms ease',
+              transform: copied ? 'scale(0.6)' : 'scale(1)',
+            }}
+          />
+          <Icon
+            name="check"
+            size={15}
+            style={{
+              position: 'absolute',
+              inset: 0,
+              color: 'var(--color-green)',
+              opacity: copied ? 1 : 0,
+              transition: 'opacity 140ms ease, transform 200ms ease',
+              transform: copied ? 'scale(1)' : 'scale(0.6)',
+            }}
+          />
+        </span>
       </IconBtn>
+      <span
+        aria-hidden={!copied}
+        style={{
+          fontSize: 11,
+          fontWeight: 600,
+          color: 'var(--color-green)',
+          letterSpacing: '0.04em',
+          textTransform: 'uppercase',
+          opacity: copied ? 1 : 0,
+          transform: copied ? 'translateX(0)' : 'translateX(-4px)',
+          transition: 'opacity 180ms ease, transform 220ms ease',
+          pointerEvents: 'none',
+        }}
+      >
+        Copied
+      </span>
     </div>
   );
 }

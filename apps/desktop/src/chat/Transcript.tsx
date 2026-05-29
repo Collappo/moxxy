@@ -2,40 +2,110 @@ import { useEffect, useMemo, useRef } from 'react';
 import type { Block } from '@/lib/useChat';
 import { BlockView } from './BlockView';
 import { ToolGroupView } from './ToolGroupView';
+import { SkillGroupView } from './SkillGroupView';
 import { ThinkingIndicator } from './ThinkingIndicator';
 
 type ToolBlock = Extract<Block, { kind: 'tool' }>;
+type SkillMarker = Extract<Block, { kind: 'skill_marker' }>;
 
 /**
- * Render blocks grouped — consecutive tool blocks collapse into a
- * single ToolGroupView so the transcript stays readable when the
- * agent fires off several tool calls in a row.
+ * Render-time grouping:
+ *   - skill_marker + the preceding `load_skill` tool + every
+ *     subsequent consecutive tool → one SkillGroupView block.
+ *   - Plain consecutive tools (no skill context) → one ToolGroupView
+ *     block.
+ *   - Everything else renders as a single Block.
+ *
+ * "Subsequent tools belong to a skill" is heuristic: any tool block
+ * that lands after the marker, before a non-tool block (assistant
+ * text, user, system), is treated as part of the skill's activation.
+ * That matches the way the agent invokes a skill (load → use its
+ * tools → reply) without requiring a server-side group id.
  */
 type RenderItem =
   | { kind: 'single'; key: string; block: Block }
-  | { kind: 'tools'; key: string; tools: ReadonlyArray<ToolBlock> };
+  | { kind: 'tools'; key: string; tools: ReadonlyArray<ToolBlock> }
+  | {
+      kind: 'skill';
+      key: string;
+      name: string;
+      reason: string;
+      loadTool?: ToolBlock;
+      tools: ReadonlyArray<ToolBlock>;
+    };
 
 function groupBlocks(blocks: ReadonlyArray<Block>): RenderItem[] {
   const out: RenderItem[] = [];
-  let toolBuf: ToolBlock[] = [];
-  const flush = (): void => {
-    if (toolBuf.length === 0) return;
-    out.push({
-      kind: 'tools',
-      key: `tools-${toolBuf[0]!.id}`,
-      tools: toolBuf,
-    });
-    toolBuf = [];
-  };
-  for (const b of blocks) {
+  let i = 0;
+  while (i < blocks.length) {
+    const b = blocks[i]!;
     if (b.kind === 'tool') {
-      toolBuf.push(b);
-    } else {
-      flush();
-      out.push({ kind: 'single', key: b.id, block: b });
+      // Collect run of consecutive tools.
+      const tools: ToolBlock[] = [];
+      while (i < blocks.length && blocks[i]!.kind === 'tool') {
+        tools.push(blocks[i]! as ToolBlock);
+        i++;
+      }
+      // Did a skill_marker immediately follow? Then those tools were
+      // really the skill's "load tool + body" — wrap them as one
+      // skill group. The loadTool is the LAST tool before the marker
+      // (typically a load_skill call); everything in `tools` minus
+      // that loader runs UNDER the skill.
+      if (i < blocks.length && blocks[i]!.kind === 'skill_marker') {
+        const marker = blocks[i]! as SkillMarker;
+        i++;
+        // Pull the load tool out of the trailing edge; the others are
+        // probably part of the assistant's previous chain (rare).
+        const loadTool = tools[tools.length - 1];
+        const beforeLoad = tools.slice(0, -1);
+        // Subsequent tools (until any non-tool block) belong to the
+        // skill's body.
+        const bodyTools: ToolBlock[] = [];
+        while (i < blocks.length && blocks[i]!.kind === 'tool') {
+          bodyTools.push(blocks[i]! as ToolBlock);
+          i++;
+        }
+        if (beforeLoad.length > 0) {
+          out.push({
+            kind: 'tools',
+            key: `tools-${beforeLoad[0]!.id}`,
+            tools: beforeLoad,
+          });
+        }
+        out.push({
+          kind: 'skill',
+          key: `skill-${marker.id}`,
+          name: marker.name,
+          reason: marker.reason,
+          loadTool,
+          tools: bodyTools,
+        });
+      } else if (tools.length > 0) {
+        out.push({ kind: 'tools', key: `tools-${tools[0]!.id}`, tools });
+      }
+      continue;
     }
+    if (b.kind === 'skill_marker') {
+      // Marker without an immediately-preceding load_skill tool — open
+      // a skill group, attach whatever consecutive tools follow.
+      const bodyTools: ToolBlock[] = [];
+      i++;
+      while (i < blocks.length && blocks[i]!.kind === 'tool') {
+        bodyTools.push(blocks[i]! as ToolBlock);
+        i++;
+      }
+      out.push({
+        kind: 'skill',
+        key: `skill-${b.id}`,
+        name: b.name,
+        reason: b.reason,
+        tools: bodyTools,
+      });
+      continue;
+    }
+    out.push({ kind: 'single', key: b.id, block: b });
+    i++;
   }
-  flush();
   return out;
 }
 
@@ -84,34 +154,36 @@ export function Transcript({
         gap: 16,
       }}
     >
-      {items.map((item) =>
-        item.kind === 'tools' ? (
-          <ToolGroupView key={item.key} tools={item.tools} />
-        ) : (
-          <BlockView key={item.key} block={item.block} />
-        ),
-      )}
+      {items.map((item) => {
+        if (item.kind === 'tools') {
+          return <ToolGroupView key={item.key} tools={item.tools} />;
+        }
+        if (item.kind === 'skill') {
+          return (
+            <SkillGroupView
+              key={item.key}
+              name={item.name}
+              reason={item.reason}
+              loadTool={item.loadTool}
+              tools={item.tools}
+            />
+          );
+        }
+        return <BlockView key={item.key} block={item.block} />;
+      })}
       {sending && shouldShowThinking(blocks) && <ThinkingIndicator />}
     </div>
   );
 }
 
-/** Show the indicator only when there's no live assistant text yet.
- *  Once the first chunk lands the streaming cursor in BlockView takes
- *  over the "she's working" role. */
 function shouldShowThinking(blocks: ReadonlyArray<Block>): boolean {
   for (let i = blocks.length - 1; i >= 0; i--) {
     const b = blocks[i]!;
     if (b.kind === 'assistant') {
-      // Latest assistant block already has text → in-flight rendering
-      // is being handled by the streaming-cursor inside BlockView.
       return b.streaming && b.text.length === 0;
     }
     if (b.kind === 'user') return true;
-    // Tool / system blocks sit between user and the assistant reply
-    // (skill load, etc.) — keep showing "thinking…" until the actual
-    // assistant response starts.
-    if (b.kind === 'tool' || b.kind === 'system') continue;
+    if (b.kind === 'tool' || b.kind === 'system' || b.kind === 'skill_marker') continue;
   }
   return true;
 }
