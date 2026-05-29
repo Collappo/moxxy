@@ -46,7 +46,15 @@ export default defineConfig({
     build: {
       outDir: 'dist',
       rollupOptions: {
-        input: { index: path.resolve(__dirname, 'index.html') },
+        input: {
+          index: path.resolve(__dirname, 'index.html'),
+          // Dedicated entry for the floating focus widget. Separate
+          // HTML + entry script means the focus window doesn't share
+          // any module side-effects with the main app — no #hash
+          // routing, no splash fallback bleed, no ClerkProvider, no
+          // StrictMode double-mount.
+          focus: path.resolve(__dirname, 'focus.html'),
+        },
       },
     },
   },

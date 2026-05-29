@@ -19,6 +19,9 @@ interface CreateOpts {
   readonly devUrl?: string;
   readonly preloadPath: string;
   readonly indexHtml: string;
+  /** Path to the focus widget's dedicated HTML in the prod bundle.
+   *  In dev it's served as ${devUrl}/focus.html instead. */
+  readonly focusHtml: string;
   /** Called the moment the focus window is created so the caller
    *  can wire IPC event forwarding (runner.event, turn.complete,
    *  connection.changed) into the secondary surface. Returns an
@@ -157,12 +160,13 @@ export async function showFocusWindow(opts: CreateOpts): Promise<void> {
     if (focusWindow === win) focusWindow = null;
   });
 
-  // We load the same renderer bundle, just with a hash that flips
-  // main.tsx into focus-mode.
+  // Load the *dedicated* focus.html entry. It has its own bundle, its
+  // own React tree, and its own preload bridge — no shared
+  // module side-effects with the main app.
   if (opts.devUrl) {
-    await win.loadURL(`${opts.devUrl}#focus`);
+    await win.loadURL(`${opts.devUrl}/focus.html`);
   } else {
-    await win.loadFile(opts.indexHtml, { hash: 'focus' });
+    await win.loadFile(opts.focusHtml);
   }
 }
 

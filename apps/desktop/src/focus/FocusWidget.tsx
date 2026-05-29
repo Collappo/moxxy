@@ -1,15 +1,29 @@
 /**
- * Focus widget — multi-state floating panel.
+ * FocusWidget — the floating mini surface.
  *
- *   1. dot       64×64    Just the brand logo. Click → menu.
- *   2. menu      240×64   Logo + voice + text + restore-main + close.
- *   3. text      380×200  Compact composer (input + voice + send).
- *   4. voice     380×200  Big push-to-talk button; releases →
- *                         transcribes into the text mode.
+ * Three stages:
  *
- * Mode transitions call focus.resize IPC so the underlying
- * BrowserWindow shrinks / grows with the UI. focus.restoreMain
- * brings the main window back; close hides the widget entirely.
+ *   1. INACTIVE  44×44   Small square with the moxxy mark.
+ *                        Click → ACTIVE.
+ *
+ *   2. ACTIVE    220×56  Mark + voice + text + restore-main + close.
+ *                        Click mark → INACTIVE.
+ *                        Click voice → MINI_VOICE.
+ *                        Click text  → MINI_TEXT.
+ *
+ *   3. MINI      360×220 Compact panel for a single quick prompt.
+ *                        Header has back-to-active + restore-main.
+ *                        Body is either a text composer (mini-text)
+ *                        or a push-to-talk button (mini-voice).
+ *
+ * Resizing happens by IPC: every stage transition sends focus.resize
+ * to the main process which moves the BrowserWindow. Window position
+ * is pinned by the main process (bottom-right corner OR centre,
+ * depending on where the user dragged the widget).
+ *
+ * Inline styles throughout — we deliberately don't depend on any
+ * external CSS file. Past regressions were stylesheet races where
+ * the dot collapsed to 0×0 before focus.css finished parsing.
  */
 
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
@@ -17,324 +31,221 @@ import { api } from '@/lib/api';
 import { ChatStoreBridge, useChat } from '@/lib/useChat';
 import { chatStore } from '@/lib/chatStore';
 import { ConnectionBridge, useActiveWorkspaceId } from '@/lib/useConnection';
-import { Icon } from '@/lib/Icon';
 
-type Mode = 'dot' | 'menu' | 'text' | 'voice';
+type Stage = 'inactive' | 'active' | 'mini-text' | 'mini-voice';
 
-const MODE_DIMENSIONS: Record<Mode, { width: number; height: number }> = {
-  // Small floating tile, just big enough for the brand mark. The
-  // OS card chrome that wraps it draws the rounded-rect; we keep
-  // the visible content centred and tiny.
-  dot: { width: 44, height: 44 },
-  // Toolbar — also tightened so it doesn't read as a status bar.
-  menu: { width: 200, height: 52 },
-  text: { width: 340, height: 180 },
-  voice: { width: 340, height: 200 },
+const SIZE: Record<Stage, { width: number; height: number }> = {
+  inactive: { width: 44, height: 44 },
+  active: { width: 220, height: 56 },
+  'mini-text': { width: 360, height: 220 },
+  'mini-voice': { width: 360, height: 220 },
 };
+
+// ---- Top-level wrapper ---------------------------------------------------
 
 export function FocusWidget(): JSX.Element {
   const workspaceId = useActiveWorkspaceId();
   return (
     <>
+      {/* Bridges receive IPC events and feed chatStore / connection
+       *  state. They render null. Mounted at the top level so events
+       *  flow even while we're sitting in inactive/active stages. */}
       <ConnectionBridge />
       <ChatStoreBridge />
-      <FocusContent workspaceId={workspaceId} />
+      <Surface workspaceId={workspaceId} />
     </>
   );
 }
 
-function FocusContent({ workspaceId }: { readonly workspaceId: string | null }): JSX.Element {
-  const [mode, setMode] = useState<Mode>('dot');
-  const chat = useChat(workspaceId);
+function Surface({
+  workspaceId,
+}: {
+  readonly workspaceId: string | null;
+}): JSX.Element {
+  const [stage, setStage] = useState<Stage>('inactive');
 
-  // Resize the BrowserWindow whenever the mode changes so the chrome
-  // matches the content. Pin the bottom-right corner to the screen
-  // (main process handles that).
+  // Tell the main process to resize the BrowserWindow whenever the
+  // stage changes. Always runs (including on initial mount) so the
+  // window grows from the seed 44×44 to its first stage's size.
   useEffect(() => {
-    const { width, height } = MODE_DIMENSIONS[mode];
+    const { width, height } = SIZE[stage];
     void api().invoke('focus.resize', { width, height }).catch(() => undefined);
-  }, [mode]);
+  }, [stage]);
 
-  // Show whichever block (user OR assistant) is most recent — that's
-  // what the user actually wants reflected: their own message right
-  // after they hit send, then the response when it streams back.
-  const latest = useSyncExternalStore(
-    chatStore.subscribe,
-    () => {
-      if (!workspaceId) return null;
-      const blocks = chatStore.getChat(workspaceId).blocks;
-      for (let i = blocks.length - 1; i >= 0; i--) {
-        const b = blocks[i]!;
-        if (b.kind === 'assistant' && b.text.trim().length > 0) {
-          return { who: 'assistant' as const, text: b.text };
-        }
-        if (b.kind === 'user' && b.text.trim().length > 0) {
-          return { who: 'user' as const, text: b.text };
-        }
-      }
-      return null;
-    },
-  );
-
-  if (mode === 'dot') {
-    return <DotMode onExpand={() => setMode('menu')} sending={chat.sending} />;
+  if (stage === 'inactive') {
+    return <Inactive onActivate={() => setStage('active')} />;
   }
-  if (mode === 'menu')
+  if (stage === 'active') {
     return (
-      <MenuMode
-        onText={() => setMode('text')}
-        onVoice={() => setMode('voice')}
-        onCollapse={() => setMode('dot')}
-        sending={chat.sending}
+      <Active
+        onCollapse={() => setStage('inactive')}
+        onText={() => setStage('mini-text')}
+        onVoice={() => setStage('mini-voice')}
       />
     );
-  if (mode === 'voice')
+  }
+  if (stage === 'mini-text') {
     return (
-      <VoiceMode
+      <MiniText
         workspaceId={workspaceId}
-        onBack={() => setMode('menu')}
-        onDone={() => setMode('text')}
+        onBack={() => setStage('active')}
       />
     );
+  }
   return (
-    <TextMode
+    <MiniVoice
       workspaceId={workspaceId}
-      onBack={() => setMode('menu')}
-      sending={chat.sending}
-      latest={latest}
-      onSend={(p) => void chat.send(p)}
+      onBack={() => setStage('active')}
+      onSent={() => setStage('mini-text')}
     />
   );
 }
 
-interface LatestBlock {
-  readonly who: 'user' | 'assistant';
-  readonly text: string;
-}
+// ---- Stage 1: inactive ---------------------------------------------------
+// Just a small square button with the moxxy mark. The window itself is
+// 44×44; we paint a 36×36 white tile in the centre, 4 px transparent
+// ring around it acts as the drag handle.
 
-// --- dot (small floating logo) --------------------------------------------
-//
-// The dot is the default "I am here" surface — a small circular logo
-// that expands to the menu on click. Corners around the circle are a
-// drag region so the user can grab the widget by the (visually empty)
-// corner area; the button itself is no-drag so the click reaches us.
-
-/* The dot mode is intentionally stateless + inline-styled so it
- * cannot flicker, fail to render, or become unclickable due to
- * CSS-loading races, useState/useEffect ordering, or image-load
- * onError flips. Every previous "blank tile" regression came from
- * something dynamic happening here — keep this dumb. */
-function DotMode({
-  onExpand,
-  sending,
-}: {
-  readonly onExpand: () => void;
-  readonly sending: boolean;
-}): JSX.Element {
+function Inactive({ onActivate }: { readonly onActivate: () => void }): JSX.Element {
   return (
-    <div
-      // 4 px transparent ring around the button = drag handle for
-      // the user's corner-drag request.
-      style={{
-        width: '100%',
-        height: '100%',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: 4,
-        boxSizing: 'border-box',
-        WebkitAppRegion: 'drag',
-      } as React.CSSProperties}
-    >
+    <div style={style.dragShell}>
       <button
         type="button"
-        onClick={onExpand}
+        onClick={onActivate}
         aria-label="moxxy · click to expand"
-        style={{
-          width: 36,
-          height: 36,
-          padding: 0,
-          margin: 0,
-          background: '#ffffff',
-          border: '1px solid rgba(15, 23, 42, 0.12)',
-          borderRadius: 10,
-          boxShadow: sending
-            ? '0 0 0 2px rgba(236, 72, 153, 0.55), 0 6px 14px -6px rgba(236, 72, 153, 0.35)'
-            : '0 6px 14px -6px rgba(15, 23, 42, 0.25), 0 2px 4px -2px rgba(15, 23, 42, 0.15)',
-          cursor: 'pointer',
-          display: 'inline-flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          fontSize: 18,
-          fontWeight: 800,
-          color: '#ec4899',
-          letterSpacing: '-0.02em',
-          fontFamily: 'Inter, system-ui, sans-serif',
-          WebkitAppRegion: 'no-drag',
-          transition: 'transform 120ms ease, box-shadow 200ms ease',
-        } as React.CSSProperties}
+        style={style.markButton}
       >
-        m
+        <MarkGlyph />
       </button>
     </div>
   );
 }
 
-// --- menu (voice + text + restore + close) -------------------------------
-//
-// Layout intent (per user feedback):
-//   - Square-ish rounded-rect, not a pill — drag-feels like a small
-//     widget, not a status bar.
-//   - The entire card is a drag handle (WebkitAppRegion: drag), the
-//     individual buttons opt OUT with WebkitAppRegion: no-drag so
-//     they remain clickable. The grippy "rails" along the left and
-//     right edges are visual hints for where the safe drag zones
-//     are even when buttons cover the centre.
+// ---- Stage 2: active -----------------------------------------------------
+// Mark + voice + text + restore-main + close. The card fills the
+// window; the inner row stays clickable while the wrapping div is a
+// drag handle.
 
-function MenuMode({
+function Active({
+  onCollapse,
   onText,
   onVoice,
-  onCollapse,
-  sending,
 }: {
+  readonly onCollapse: () => void;
   readonly onText: () => void;
   readonly onVoice: () => void;
-  readonly onCollapse: () => void;
-  readonly sending: boolean;
 }): JSX.Element {
-  // CamelCase WebkitAppRegion — React drops leading-hyphen keys in
-  // some versions, this form is recognised by both React and Electron.
-  const drag = { WebkitAppRegion: 'drag' } as React.CSSProperties;
-  const noDrag = { WebkitAppRegion: 'no-drag' } as React.CSSProperties;
   return (
-    <div className="focus-menu" style={drag} data-busy={sending ? 'true' : 'false'}>
-      <span aria-hidden className="focus-menu__grip focus-menu__grip--left" />
+    <div style={style.card}>
       <button
         type="button"
-        className="focus-menu__brand focus-menu__brand--button"
         onClick={onCollapse}
-        aria-label="Collapse to logo"
-        style={noDrag}
+        aria-label="Collapse"
+        style={style.cardBrand}
       >
-        <img
-          src="./logo.png"
-          alt=""
-          aria-hidden
-          draggable={false}
-          onError={(e) => {
-            // Hide a broken image silently — collapse button still
-            // works without the brand mark.
-            e.currentTarget.style.display = 'none';
-          }}
-        />
+        <MarkGlyph small />
       </button>
-      <div className="focus-menu__actions" style={noDrag}>
-        <button
-          type="button"
-          className="focus-menu__btn"
-          onClick={onVoice}
-          aria-label="Voice"
-        >
-          <Icon name="mic" size={16} />
-        </button>
-        <button
-          type="button"
-          className="focus-menu__btn"
-          onClick={onText}
-          aria-label="Text input"
-        >
-          <Icon name="edit" size={15} />
-        </button>
-        <button
-          type="button"
-          className="focus-menu__btn"
+      <div style={style.divider} aria-hidden />
+      <div style={style.cardActions}>
+        <ActionButton onClick={onVoice} aria-label="Voice">
+          <MicIcon />
+        </ActionButton>
+        <ActionButton onClick={onText} aria-label="Text">
+          <EditIcon />
+        </ActionButton>
+        <ActionButton
           onClick={() => void api().invoke('focus.restoreMain').catch(() => undefined)}
           aria-label="Open main window"
         >
-          <Icon name="workspace" size={15} />
-        </button>
-        <button
-          type="button"
-          className="focus-menu__btn focus-menu__btn--close"
+          <WindowIcon />
+        </ActionButton>
+        <ActionButton
           onClick={() => void api().invoke('focus.close').catch(() => undefined)}
           aria-label="Close focus mode"
+          variant="danger"
         >
-          <Icon name="x" size={13} />
-        </button>
+          <XIcon />
+        </ActionButton>
       </div>
-      <span aria-hidden className="focus-menu__grip focus-menu__grip--right" />
     </div>
   );
 }
 
-// --- text mode (compact composer + status) --------------------------------
+// ---- Stage 3a: mini-text -------------------------------------------------
 
-function TextMode({
+function MiniText({
   workspaceId,
   onBack,
-  sending,
-  latest,
-  onSend,
 }: {
   readonly workspaceId: string | null;
   readonly onBack: () => void;
-  readonly sending: boolean;
-  readonly latest: LatestBlock | null;
-  readonly onSend: (prompt: string) => void;
 }): JSX.Element {
   const [draft, setDraft] = useState('');
+  const chat = useChat(workspaceId);
+  const latest = useLatestBlock(workspaceId);
 
   const submit = (): void => {
     if (!workspaceId || !draft.trim()) return;
-    onSend(draft);
+    void chat.send(draft.trim());
     setDraft('');
   };
 
   return (
-    <div className="focus-widget" data-thinking={sending ? 'true' : 'false'}>
-      <PanelHeader title="Text" onBack={onBack} />
-      <StatusLine latest={latest} sending={sending} />
+    <div style={style.panel}>
+      <MiniHeader title="Text" onBack={onBack} />
+      <div style={style.panelBody}>
+        {chat.sending ? (
+          <ThinkingLine />
+        ) : latest ? (
+          <LatestLine block={latest} />
+        ) : (
+          <IdleLine
+            label={
+              workspaceId ? 'Type a quick prompt below.' : 'No active workspace.'
+            }
+          />
+        )}
+      </div>
       <form
-        className="focus-widget__composer"
+        style={style.composer}
         onSubmit={(e) => {
           e.preventDefault();
           submit();
         }}
       >
         <input
-          className="focus-widget__input"
           autoFocus
           placeholder={workspaceId ? 'Ask Moxxy…' : 'No active workspace'}
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           disabled={!workspaceId}
+          style={style.input}
         />
         <button
           type="submit"
-          className="btn-cta focus-widget__send"
           aria-label="Send"
           disabled={!workspaceId || !draft.trim()}
+          style={style.send}
         >
-          <Icon name="send" size={13} />
+          <SendIcon />
         </button>
-        {sending && <div className="focus-widget__busybar" />}
       </form>
     </div>
   );
 }
 
-// --- voice mode (big push-to-talk) ----------------------------------------
+// ---- Stage 3b: mini-voice ------------------------------------------------
 
 type VoicePhase = 'idle' | 'recording' | 'transcribing' | 'unavailable';
 
-function VoiceMode({
+function MiniVoice({
   workspaceId,
   onBack,
-  onDone,
+  onSent,
 }: {
   readonly workspaceId: string | null;
   readonly onBack: () => void;
-  readonly onDone: () => void;
+  readonly onSent: () => void;
 }): JSX.Element {
   const [phase, setPhase] = useState<VoicePhase>('idle');
   const [transcript, setTranscript] = useState('');
@@ -374,8 +285,10 @@ function VoiceMode({
     try {
       const blob = new Blob([...chunks], { type: mimeType });
       const buf = await blob.arrayBuffer();
-      const audioBase64 = arrayBufferToBase64(buf);
-      const text = await api().invoke('session.transcribe', { audioBase64, mimeType });
+      const text = await api().invoke('session.transcribe', {
+        audioBase64: arrayBufferToBase64(buf),
+        mimeType,
+      });
       if (text?.trim()) setTranscript(text.trim());
       setPhase('idle');
     } catch {
@@ -390,52 +303,52 @@ function VoiceMode({
       .invoke('session.runTurn', { workspaceId, prompt: transcript.trim() })
       .catch(() => undefined);
     setTranscript('');
-    onDone();
+    onSent();
   };
 
   return (
-    <div className="focus-widget">
-      <PanelHeader title="Voice" onBack={onBack} />
-      <div className="focus-voice">
+    <div style={style.panel}>
+      <MiniHeader title="Voice" onBack={onBack} />
+      <div
+        style={{
+          ...style.panelBody,
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: 10,
+        }}
+      >
         <button
           type="button"
-          className={`focus-voice__button focus-voice__button--${phase}`}
           onClick={() => (phase === 'recording' ? stop() : void start())}
           disabled={phase === 'transcribing' || phase === 'unavailable'}
-          aria-label={
-            phase === 'recording'
-              ? 'Tap to stop'
-              : phase === 'transcribing'
-                ? 'Transcribing…'
-                : phase === 'unavailable'
-                  ? 'Mic unavailable'
-                  : 'Tap to record'
-          }
+          style={{
+            ...style.micButton,
+            ...(phase === 'recording' ? style.micButtonRecording : null),
+            ...(phase === 'transcribing' || phase === 'unavailable'
+              ? style.micButtonDisabled
+              : null),
+          }}
+          aria-label={phase === 'recording' ? 'Tap to stop' : 'Tap to record'}
         >
-          <Icon name="mic" size={26} />
+          <MicIcon big />
         </button>
         {transcript ? (
-          <div className="focus-voice__transcript" aria-label={transcript}>
-            {transcript}
-          </div>
+          <div style={style.transcript}>{transcript}</div>
         ) : (
-          <div className="focus-voice__hint">
+          <div style={style.hint}>
             {phase === 'recording'
               ? 'Listening…'
               : phase === 'transcribing'
                 ? 'Transcribing…'
                 : phase === 'unavailable'
-                  ? 'No mic / transcriber'
+                  ? 'No mic / transcriber.'
                   : 'Tap the mic and speak.'}
           </div>
         )}
         {transcript && phase === 'idle' && (
-          <button
-            type="button"
-            onClick={sendTranscript}
-            className="btn-cta focus-voice__send"
-          >
-            Send <Icon name="send" size={12} />
+          <button type="button" onClick={sendTranscript} style={style.transcriptSend}>
+            Send
           </button>
         )}
       </div>
@@ -443,9 +356,44 @@ function VoiceMode({
   );
 }
 
-// --- shared bits ----------------------------------------------------------
+// ---- Helpers -------------------------------------------------------------
 
-function PanelHeader({
+interface LatestBlock {
+  readonly who: 'user' | 'assistant';
+  readonly text: string;
+}
+
+// Cache the latest-block snapshot per workspace so useSyncExternalStore
+// receives a stable reference when nothing actually changed. Returning
+// a fresh `{ who, text }` object every call would re-trigger render
+// loops infinitely — useSyncExternalStore strictly compares snapshots.
+const latestBlockCache = new Map<string, { key: string; block: LatestBlock }>();
+
+function readLatestBlock(workspaceId: string | null): LatestBlock | null {
+  if (!workspaceId) return null;
+  const blocks = chatStore.getChat(workspaceId).blocks;
+  for (let i = blocks.length - 1; i >= 0; i--) {
+    const b = blocks[i]!;
+    if ((b.kind === 'assistant' || b.kind === 'user') && b.text.trim()) {
+      const key = `${b.kind}:${b.text.length}:${b.text.slice(0, 64)}`;
+      const cached = latestBlockCache.get(workspaceId);
+      if (cached?.key === key) return cached.block;
+      const block: LatestBlock = { who: b.kind, text: b.text };
+      latestBlockCache.set(workspaceId, { key, block });
+      return block;
+    }
+  }
+  if (latestBlockCache.has(workspaceId)) latestBlockCache.delete(workspaceId);
+  return null;
+}
+
+function useLatestBlock(workspaceId: string | null): LatestBlock | null {
+  return useSyncExternalStore(chatStore.subscribe, () =>
+    readLatestBlock(workspaceId),
+  );
+}
+
+function MiniHeader({
   title,
   onBack,
 }: {
@@ -453,86 +401,213 @@ function PanelHeader({
   readonly onBack: () => void;
 }): JSX.Element {
   return (
-    <header
-      className="focus-widget__header"
-      style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
-    >
-      <div className="focus-widget__brand">
-        <img src="/logo.png" alt="" aria-hidden width={16} height={16} style={{ borderRadius: 4 }} draggable={false} />
-        <span>moxxy · {title}</span>
+    <header style={style.miniHeader}>
+      <button type="button" onClick={onBack} style={style.miniBack} aria-label="Back">
+        <ChevronIcon />
+      </button>
+      <div style={style.miniTitle}>
+        <MarkGlyph small />
+        <span>{title}</span>
       </div>
-      <div style={{ display: 'flex', gap: 4, WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
-        <button
-          type="button"
-          className="btn-icon focus-widget__close"
-          aria-label="Back to menu"
-          onClick={onBack}
-        >
-          <Icon name="chevron-right" size={12} style={{ transform: 'rotate(180deg)' }} />
-        </button>
-        <button
-          type="button"
-          className="btn-icon focus-widget__close"
-          aria-label="Open main window"
-          onClick={() => void api().invoke('focus.restoreMain').catch(() => undefined)}
-        >
-          <Icon name="workspace" size={12} />
-        </button>
-      </div>
+      <button
+        type="button"
+        onClick={() => void api().invoke('focus.restoreMain').catch(() => undefined)}
+        style={style.miniRestore}
+        aria-label="Open main window"
+      >
+        <WindowIcon />
+      </button>
     </header>
   );
 }
 
-function StatusLine({
-  latest,
-  sending,
+function ActionButton({
+  onClick,
+  children,
+  variant,
+  ...rest
 }: {
-  readonly latest: LatestBlock | null;
-  readonly sending: boolean;
+  readonly onClick: () => void;
+  readonly children: React.ReactNode;
+  readonly variant?: 'danger';
+  readonly 'aria-label': string;
 }): JSX.Element {
-  // If we have a most-recent block, surface it whether or not a turn
-  // is in flight — the user wants to see their own message right
-  // after they sent it. The "thinking…" dots become the prefix so the
-  // running state is still visually distinct.
-  if (latest) {
-    const prefix =
-      latest.who === 'user' ? 'you · ' : sending ? '· · ·  ' : '';
-    return (
-      <div
-        className={`focus-widget__status${
-          latest.who === 'user' ? ' focus-widget__status--user' : ''
-        }${sending ? ' focus-widget__status--thinking' : ''}`}
-      >
-        {sending && (
-          <>
-            <span className="thinking-dot" />
-            <span className="thinking-dot" style={{ animationDelay: '160ms' }} />
-            <span className="thinking-dot" style={{ animationDelay: '320ms' }} />
-          </>
-        )}
-        <span>
-          {prefix && <span style={{ opacity: 0.7 }}>{prefix}</span>}
-          {latest.text.trim().split(/\n/)[0]}
-        </span>
-      </div>
-    );
-  }
-  if (sending) {
-    return (
-      <div className="focus-widget__status focus-widget__status--thinking">
-        <span className="thinking-dot" />
-        <span className="thinking-dot" style={{ animationDelay: '160ms' }} />
-        <span className="thinking-dot" style={{ animationDelay: '320ms' }} />
-        <span>working…</span>
-      </div>
-    );
-  }
+  const [hover, setHover] = useState(false);
   return (
-    <div className="focus-widget__status focus-widget__status--idle">
-      Ready when you are.
+    <button
+      type="button"
+      onClick={onClick}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      style={{
+        ...style.actionBtn,
+        ...(hover
+          ? variant === 'danger'
+            ? { background: 'rgba(239, 68, 68, 0.15)', color: '#ef4444' }
+            : { background: 'rgba(15, 23, 42, 0.07)', color: '#0f172a' }
+          : null),
+      }}
+      aria-label={rest['aria-label']}
+    >
+      {children}
+    </button>
+  );
+}
+
+function MarkGlyph({ small = false }: { readonly small?: boolean }): JSX.Element {
+  const dim = small ? 22 : 24;
+  return (
+    <span
+      aria-hidden
+      style={{
+        width: dim,
+        height: dim,
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        fontFamily: 'Inter, system-ui, sans-serif',
+        fontSize: small ? 14 : 16,
+        fontWeight: 800,
+        color: '#ec4899',
+        letterSpacing: '-0.04em',
+      }}
+    >
+      m
+    </span>
+  );
+}
+
+function ThinkingLine(): JSX.Element {
+  return (
+    <div style={style.lineRow}>
+      <Dot delay={0} />
+      <Dot delay={160} />
+      <Dot delay={320} />
+      <span style={{ color: '#ec4899', fontWeight: 600, fontSize: 13 }}>working…</span>
     </div>
   );
 }
+
+function LatestLine({ block }: { readonly block: LatestBlock }): JSX.Element {
+  const prefix = block.who === 'user' ? 'you · ' : '';
+  return (
+    <div
+      style={{
+        ...style.lineRow,
+        whiteSpace: 'nowrap',
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        display: 'block',
+        fontSize: 13,
+        color: '#0f172a',
+        lineHeight: 1.4,
+      }}
+      title={block.text}
+    >
+      {prefix && (
+        <span style={{ opacity: 0.55, fontWeight: 600, marginRight: 4 }}>{prefix}</span>
+      )}
+      {block.text.trim().split(/\n/)[0]}
+    </div>
+  );
+}
+
+function IdleLine({ label }: { readonly label: string }): JSX.Element {
+  return (
+    <div style={{ fontSize: 12.5, color: '#64748b', fontStyle: 'italic' }}>{label}</div>
+  );
+}
+
+function Dot({ delay }: { readonly delay: number }): JSX.Element {
+  return (
+    <span
+      style={{
+        display: 'inline-block',
+        width: 5,
+        height: 5,
+        borderRadius: 5,
+        background: '#ec4899',
+        margin: '0 1px',
+        animation: 'focus-thinking 1.2s ease-in-out infinite',
+        animationDelay: `${delay}ms`,
+      }}
+    />
+  );
+}
+
+// ---- Icons (inline SVG — no external dependency, always renders) ---------
+
+function MicIcon({ big = false }: { readonly big?: boolean }): JSX.Element {
+  const size = big ? 26 : 15;
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden>
+      <rect x="9" y="3" width="6" height="12" rx="3" stroke="currentColor" strokeWidth="2" />
+      <path d="M5 11a7 7 0 0014 0M12 18v3" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
+function EditIcon(): JSX.Element {
+  return (
+    <svg width={14} height={14} viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path
+        d="M4 20h4l10-10-4-4L4 16v4zM14 6l4 4"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+function WindowIcon(): JSX.Element {
+  return (
+    <svg width={14} height={14} viewBox="0 0 24 24" fill="none" aria-hidden>
+      <rect x="3" y="5" width="18" height="14" rx="2" stroke="currentColor" strokeWidth="2" />
+      <path d="M3 9h18" stroke="currentColor" strokeWidth="2" />
+    </svg>
+  );
+}
+function XIcon(): JSX.Element {
+  return (
+    <svg width={12} height={12} viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path
+        d="M6 6l12 12M18 6L6 18"
+        stroke="currentColor"
+        strokeWidth="2.4"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+function ChevronIcon(): JSX.Element {
+  return (
+    <svg width={12} height={12} viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path
+        d="M15 6l-6 6 6 6"
+        stroke="currentColor"
+        strokeWidth="2.4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+function SendIcon(): JSX.Element {
+  return (
+    <svg width={14} height={14} viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path
+        d="M3 12l18-9-7 18-3-8-8-1z"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinejoin="round"
+        fill="currentColor"
+        fillOpacity="0.85"
+      />
+    </svg>
+  );
+}
+
+// ---- Utilities -----------------------------------------------------------
 
 function arrayBufferToBase64(buf: ArrayBuffer): string {
   const bytes = new Uint8Array(buf);
@@ -541,4 +616,261 @@ function arrayBufferToBase64(buf: ArrayBuffer): string {
     binary += String.fromCharCode(bytes[i]!);
   }
   return btoa(binary);
+}
+
+// ---- Styles (inline objects — no external stylesheet dependency) --------
+
+const drag = { WebkitAppRegion: 'drag' as const };
+const noDrag = { WebkitAppRegion: 'no-drag' as const };
+
+const style: Record<string, React.CSSProperties> = {
+  dragShell: {
+    width: '100%',
+    height: '100%',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 4,
+    boxSizing: 'border-box',
+    ...drag,
+  },
+  markButton: {
+    width: 36,
+    height: 36,
+    padding: 0,
+    margin: 0,
+    background: '#ffffff',
+    border: '1px solid rgba(15, 23, 42, 0.12)',
+    borderRadius: 10,
+    boxShadow:
+      '0 6px 14px -6px rgba(15, 23, 42, 0.25), 0 2px 4px -2px rgba(15, 23, 42, 0.15)',
+    cursor: 'pointer',
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    transition: 'transform 120ms ease, box-shadow 200ms ease',
+    ...noDrag,
+  },
+  card: {
+    width: '100%',
+    height: '100%',
+    boxSizing: 'border-box',
+    padding: '6px 10px 6px 8px',
+    display: 'flex',
+    alignItems: 'center',
+    gap: 6,
+    background: '#ffffff',
+    border: '1px solid rgba(15, 23, 42, 0.12)',
+    borderRadius: 12,
+    boxShadow:
+      '0 10px 24px -10px rgba(15, 23, 42, 0.25), 0 4px 10px -6px rgba(15, 23, 42, 0.15)',
+    ...drag,
+  },
+  cardBrand: {
+    width: 32,
+    height: 32,
+    padding: 0,
+    margin: 0,
+    background: 'transparent',
+    border: 'none',
+    borderRadius: 8,
+    cursor: 'pointer',
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+    ...noDrag,
+  },
+  divider: {
+    width: 1,
+    height: 24,
+    background: 'rgba(15, 23, 42, 0.12)',
+    flexShrink: 0,
+  },
+  cardActions: {
+    display: 'flex',
+    gap: 2,
+    marginLeft: 'auto',
+    ...noDrag,
+  },
+  actionBtn: {
+    width: 32,
+    height: 32,
+    padding: 0,
+    margin: 0,
+    border: 'none',
+    background: 'transparent',
+    borderRadius: 8,
+    color: '#64748b',
+    cursor: 'pointer',
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    transition: 'background-color 140ms ease, color 140ms ease',
+  },
+  panel: {
+    width: '100%',
+    height: '100%',
+    boxSizing: 'border-box',
+    display: 'flex',
+    flexDirection: 'column',
+    background: '#ffffff',
+    border: '1px solid rgba(15, 23, 42, 0.12)',
+    borderRadius: 14,
+    boxShadow:
+      '0 18px 36px -12px rgba(15, 23, 42, 0.28), 0 6px 14px -8px rgba(15, 23, 42, 0.18)',
+    overflow: 'hidden',
+  },
+  miniHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: '8px 10px',
+    borderBottom: '1px solid rgba(15, 23, 42, 0.08)',
+    ...drag,
+  },
+  miniBack: {
+    width: 24,
+    height: 24,
+    padding: 0,
+    background: 'transparent',
+    border: 'none',
+    color: '#64748b',
+    cursor: 'pointer',
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...noDrag,
+  },
+  miniTitle: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 6,
+    fontSize: 11.5,
+    fontWeight: 700,
+    textTransform: 'uppercase',
+    letterSpacing: '0.05em',
+    color: '#64748b',
+  },
+  miniRestore: {
+    width: 24,
+    height: 24,
+    padding: 0,
+    background: 'transparent',
+    border: 'none',
+    color: '#64748b',
+    cursor: 'pointer',
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...noDrag,
+  },
+  panelBody: {
+    flex: 1,
+    padding: '10px 14px',
+    display: 'flex',
+    alignItems: 'center',
+    minHeight: 0,
+  },
+  lineRow: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 4,
+  },
+  composer: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 6,
+    padding: '8px 10px',
+    borderTop: '1px solid rgba(15, 23, 42, 0.08)',
+    background: '#fff',
+    ...noDrag,
+  },
+  input: {
+    flex: 1,
+    height: 32,
+    padding: '0 10px',
+    fontSize: 13,
+    color: '#0f172a',
+    background: '#f8fafc',
+    border: '1px solid rgba(15, 23, 42, 0.12)',
+    borderRadius: 8,
+    outline: 'none',
+    fontFamily: 'inherit',
+  },
+  send: {
+    width: 32,
+    height: 32,
+    border: 'none',
+    borderRadius: 8,
+    background: 'linear-gradient(135deg, #ec4899, #d946ef)',
+    color: '#fff',
+    cursor: 'pointer',
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+  micButton: {
+    width: 72,
+    height: 72,
+    border: 'none',
+    borderRadius: 36,
+    background: 'linear-gradient(135deg, #ec4899, #d946ef)',
+    color: '#fff',
+    cursor: 'pointer',
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    boxShadow: '0 12px 24px -10px rgba(236, 72, 153, 0.55)',
+    transition: 'transform 120ms ease, background 200ms ease',
+  },
+  micButtonRecording: {
+    background: '#ef4444',
+    boxShadow: '0 0 0 4px rgba(239, 68, 68, 0.25), 0 12px 24px -10px rgba(239, 68, 68, 0.55)',
+  },
+  micButtonDisabled: {
+    opacity: 0.6,
+    cursor: 'default',
+  },
+  transcript: {
+    fontSize: 12.5,
+    color: '#0f172a',
+    padding: '6px 10px',
+    background: '#f8fafc',
+    border: '1px solid rgba(15, 23, 42, 0.12)',
+    borderRadius: 8,
+    maxWidth: '100%',
+    textAlign: 'center',
+  },
+  hint: {
+    fontSize: 12,
+    color: '#64748b',
+    letterSpacing: '0.02em',
+  },
+  transcriptSend: {
+    padding: '6px 14px',
+    borderRadius: 999,
+    fontSize: 12,
+    fontWeight: 700,
+    border: 'none',
+    background: 'linear-gradient(135deg, #ec4899, #d946ef)',
+    color: '#fff',
+    cursor: 'pointer',
+  },
+};
+
+// ---- Keyframe for the thinking dots --------------------------------------
+// Injected once on first import — avoids relying on an external CSS file.
+
+if (typeof document !== 'undefined' && !document.getElementById('focus-keyframes')) {
+  const styleTag = document.createElement('style');
+  styleTag.id = 'focus-keyframes';
+  styleTag.textContent = `
+    @keyframes focus-thinking {
+      0%, 100% { transform: translateY(0); opacity: 0.4; }
+      50%      { transform: translateY(-3px); opacity: 1; }
+    }
+  `;
+  document.head.appendChild(styleTag);
 }

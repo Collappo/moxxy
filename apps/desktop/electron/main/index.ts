@@ -130,6 +130,7 @@ async function createWindow(): Promise<void> {
     devUrl: isDev ? process.env['ELECTRON_RENDERER_URL'] : undefined,
     preloadPath: path.join(__dirname, '..', 'preload', 'index.mjs'),
     indexHtml: path.join(__dirname, '..', '..', 'dist', 'index.html'),
+    focusHtml: path.join(__dirname, '..', '..', 'dist', 'focus.html'),
     /** Bind the focus widget to the same runner pool as the main
      *  window so it sees connection state + every runner event, but
      *  pass claimGlobal: false so the IPC RPC routing (runTurn /
