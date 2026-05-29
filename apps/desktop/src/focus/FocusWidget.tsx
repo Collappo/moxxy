@@ -19,9 +19,10 @@ import { chatStore } from '@/lib/chatStore';
 import { ConnectionBridge, useActiveWorkspaceId } from '@/lib/useConnection';
 import { Icon } from '@/lib/Icon';
 
-type Mode = 'menu' | 'text' | 'voice';
+type Mode = 'dot' | 'menu' | 'text' | 'voice';
 
 const MODE_DIMENSIONS: Record<Mode, { width: number; height: number }> = {
+  dot: { width: 64, height: 64 },
   menu: { width: 240, height: 72 },
   text: { width: 380, height: 200 },
   voice: { width: 380, height: 220 },
@@ -39,7 +40,7 @@ export function FocusWidget(): JSX.Element {
 }
 
 function FocusContent({ workspaceId }: { readonly workspaceId: string | null }): JSX.Element {
-  const [mode, setMode] = useState<Mode>('menu');
+  const [mode, setMode] = useState<Mode>('dot');
   const chat = useChat(workspaceId);
 
   // Resize the BrowserWindow whenever the mode changes so the chrome
@@ -63,11 +64,15 @@ function FocusContent({ workspaceId }: { readonly workspaceId: string | null }):
     },
   );
 
+  if (mode === 'dot') {
+    return <DotMode onExpand={() => setMode('menu')} sending={chat.sending} />;
+  }
   if (mode === 'menu')
     return (
       <MenuMode
         onText={() => setMode('text')}
         onVoice={() => setMode('voice')}
+        onCollapse={() => setMode('dot')}
         sending={chat.sending}
       />
     );
@@ -90,7 +95,39 @@ function FocusContent({ workspaceId }: { readonly workspaceId: string | null }):
   );
 }
 
-// --- menu (logo + voice + text + restore + close) -------------------------
+// --- dot (small floating logo) --------------------------------------------
+//
+// The dot is the default "I am here" surface — a small circular logo
+// that expands to the menu on click. Corners around the circle are a
+// drag region so the user can grab the widget by the (visually empty)
+// corner area; the button itself is no-drag so the click reaches us.
+
+function DotMode({
+  onExpand,
+  sending,
+}: {
+  readonly onExpand: () => void;
+  readonly sending: boolean;
+}): JSX.Element {
+  const drag = { WebkitAppRegion: 'drag' } as React.CSSProperties;
+  const noDrag = { WebkitAppRegion: 'no-drag' } as React.CSSProperties;
+  return (
+    <div className="focus-dot__shell" style={drag}>
+      <button
+        type="button"
+        onClick={onExpand}
+        aria-label="moxxy · click to expand"
+        className="focus-dot"
+        data-busy={sending ? 'true' : 'false'}
+        style={noDrag}
+      >
+        <img src="/logo.png" alt="moxxy" draggable={false} />
+      </button>
+    </div>
+  );
+}
+
+// --- menu (voice + text + restore + close) -------------------------------
 //
 // Layout intent (per user feedback):
 //   - Square-ish rounded-rect, not a pill — drag-feels like a small
@@ -104,10 +141,12 @@ function FocusContent({ workspaceId }: { readonly workspaceId: string | null }):
 function MenuMode({
   onText,
   onVoice,
+  onCollapse,
   sending,
 }: {
   readonly onText: () => void;
   readonly onVoice: () => void;
+  readonly onCollapse: () => void;
   readonly sending: boolean;
 }): JSX.Element {
   // CamelCase WebkitAppRegion — React drops leading-hyphen keys in
@@ -117,9 +156,15 @@ function MenuMode({
   return (
     <div className="focus-menu" style={drag} data-busy={sending ? 'true' : 'false'}>
       <span aria-hidden className="focus-menu__grip focus-menu__grip--left" />
-      <div className="focus-menu__brand" style={noDrag}>
+      <button
+        type="button"
+        className="focus-menu__brand focus-menu__brand--button"
+        onClick={onCollapse}
+        aria-label="Collapse to logo"
+        style={noDrag}
+      >
         <img src="/logo.png" alt="" aria-hidden draggable={false} />
-      </div>
+      </button>
       <div className="focus-menu__actions" style={noDrag}>
         <button
           type="button"
