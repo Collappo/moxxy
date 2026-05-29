@@ -232,19 +232,44 @@ export function useRunnerSession(): RunnerSession {
 
   useEffect(() => {
     let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let ready = false;
 
-    void invoke<boolean>('runner_ready', { window: windowLabel })
-      .then((ready) => {
-        if (!cancelled) dispatchRef.current({ type: 'ready', value: ready });
-      })
-      .catch(() => {
-        /* defensive — leave default */
-      });
+    // Boot is async on the Rust side — the bridge may not be in the
+    // registry yet when this hook first mounts. Subscribing alone is
+    // racy (the boot task can fire `runner.ready` before our listener
+    // is registered). So we poll until the invoke returns true and
+    // then stop. The subscribe stays installed for the lifetime of
+    // the hook so subsequent disconnect/reconnect transitions still
+    // propagate.
+    const POLL_INTERVAL_MS = 400;
+    const POLL_TIMEOUT_MS = 30_000;
+    const startedAt = Date.now();
+
+    const poll = (): void => {
+      if (cancelled || ready) return;
+      void invoke<boolean>('runner_ready', { window: windowLabel })
+        .then((value) => {
+          if (cancelled) return;
+          if (value) {
+            ready = true;
+            dispatchRef.current({ type: 'ready', value: true });
+            return;
+          }
+          if (Date.now() - startedAt >= POLL_TIMEOUT_MS) return;
+          timer = setTimeout(poll, POLL_INTERVAL_MS);
+        })
+        .catch(() => {
+          // Command not registered in tests — give up gracefully.
+        });
+    };
+    poll();
 
     const unsubs: Array<Promise<() => void>> = [
-      subscribe<boolean>('runner.ready', (v) =>
-        dispatchRef.current({ type: 'ready', value: v }),
-      ),
+      subscribe<boolean>('runner.ready', (v) => {
+        if (v) ready = true;
+        dispatchRef.current({ type: 'ready', value: v });
+      }),
       subscribe<RunnerEvent>('runner.event', (event) =>
         dispatchRef.current({ type: 'event', event }),
       ),
@@ -264,6 +289,7 @@ export function useRunnerSession(): RunnerSession {
 
     return () => {
       cancelled = true;
+      if (timer !== null) clearTimeout(timer);
       for (const u of unsubs) {
         void u.then((fn) => fn());
       }

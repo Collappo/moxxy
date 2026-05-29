@@ -243,7 +243,7 @@ function EmptyState({
           {ready
             ? 'Type a prompt below to start your first turn.'
             : status === 'running'
-              ? 'Connect a provider to start your first turn.'
+              ? 'Connecting to runner…'
               : status === 'starting'
                 ? 'Starting the local runner…'
                 : 'Runner offline — open the dev panel to inspect logs.'}
