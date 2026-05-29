@@ -108,13 +108,18 @@ export function ChatStoreBridge(): null {
   return null;
 }
 
+/** Stable empty-array reference so useSyncExternalStore identity
+ *  checks pass when there's no workspace bound yet. */
+const EMPTY_QUEUE_SNAPSHOT: ReadonlyArray<{ readonly id: string; readonly prompt: string }> =
+  Object.freeze([]);
+
 /** Read the queue snapshot for a workspace. Used by the composer to
  *  render the pending-sends preview. */
 export function useQueuedTurns(
   workspaceId: string | null,
 ): ReadonlyArray<{ readonly id: string; readonly prompt: string }> {
   return useSyncExternalStore(chatStore.subscribe, () =>
-    workspaceId ? chatStore.getQueue(workspaceId) : [],
+    workspaceId ? chatStore.getQueue(workspaceId) : EMPTY_QUEUE_SNAPSHOT,
   );
 }
 

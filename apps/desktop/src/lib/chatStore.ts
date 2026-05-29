@@ -48,6 +48,12 @@ const blankChat = (): InternalChat => ({
 const STORAGE_PREFIX = 'moxxy:chat:';
 const STORAGE_VERSION = 1;
 
+/** Stable empty-array reference returned from getQueue / getModel when
+ *  the workspace has no state yet. useSyncExternalStore compares the
+ *  snapshot by reference identity, so returning a fresh [] each call
+ *  trips an infinite re-render loop. */
+const EMPTY_QUEUE: ReadonlyArray<QueuedTurn> = Object.freeze([]);
+
 /** Hard cap on persisted blocks per workspace. localStorage has a
  *  ~5MB total budget across the whole origin; large tool outputs can
  *  blow that out fast. Cap at the most recent N blocks; older history
@@ -177,10 +183,13 @@ class ChatStore {
     this.emit();
   }
 
-  /** Read the queue for a workspace. Used by the composer to show
-   *  pending sends. */
+  /** Read the queue for a workspace. Returns a stable empty-array
+   *  reference when nothing is queued (or the workspace hasn't been
+   *  initialised) — useSyncExternalStore identity-checks getSnapshot's
+   *  return value, so producing a fresh [] every call would trigger
+   *  "Maximum update depth exceeded." */
   getQueue(workspaceId: string): ReadonlyArray<QueuedTurn> {
-    return this.chats.get(workspaceId)?.queue ?? [];
+    return this.chats.get(workspaceId)?.queue ?? EMPTY_QUEUE;
   }
 
   /** Push a turn onto the queue. Returns the queued turn id. */
