@@ -71,6 +71,22 @@ export function registerIpcHandlers(pool: RunnerPool, desks: DeskStore): void {
     const session = pool.active()?.remote();
     if (session) session.providers.setActive(provider);
   });
+  handle('onboarding.providerAuthKind', async ({ provider }) => {
+    // The only built-in OAuth provider today is openai-codex; admin-
+    // registered providers in providers.json are all api-key. Keep
+    // this list as the source of truth until the runner exposes
+    // provider auth metadata over RPC.
+    const OAUTH_PROVIDERS = new Set(['openai-codex']);
+    return OAUTH_PROVIDERS.has(provider) ? 'oauth' : 'api-key';
+  });
+  handle('onboarding.runProviderLogin', async ({ provider }) => {
+    const { runProviderLogin } = await import('./installer');
+    const target = BrowserWindowApi.getFocusedWindow() ?? BrowserWindowApi.getAllWindows()[0];
+    if (!target) throw new Error('no window to stream login progress to');
+    const code = await runProviderLogin(provider, target);
+    if (code === 0) pool.active()?.forceRetry();
+    return code;
+  });
 
   // ---- Session (per-workspace) --------------------------------------------
 

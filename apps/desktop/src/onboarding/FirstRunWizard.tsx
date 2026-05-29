@@ -658,10 +658,12 @@ function ProviderStep({
     'openai-codex',
   ]);
   const [provider, setProvider] = useState('anthropic');
+  const [authKind, setAuthKind] = useState<'oauth' | 'api-key'>('api-key');
   const [secret, setSecret] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
+  const [loginLog, setLoginLog] = useState<string[]>([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -680,7 +682,36 @@ function ProviderStep({
     };
   }, []);
 
-  const save = async (): Promise<void> => {
+  // Refresh the auth kind every time the selected provider changes so
+  // the UI flips between "Paste API key" and "Sign in with browser".
+  useEffect(() => {
+    let cancelled = false;
+    setDone(false);
+    setError(null);
+    void api()
+      .invoke('onboarding.providerAuthKind', { provider })
+      .then((kind) => {
+        if (!cancelled) setAuthKind(kind);
+      })
+      .catch(() => {
+        if (!cancelled) setAuthKind('api-key');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [provider]);
+
+  // Reuse the install-progress channel so the OAuth subprocess's
+  // stdout (the URL prompt, success row, etc.) streams to the
+  // log box.
+  useEffect(() => {
+    const off = api().subscribe('onboarding.install.progress', (line: string) => {
+      setLoginLog((cur) => [...cur.slice(-80), line]);
+    });
+    return off;
+  }, []);
+
+  const saveKey = async (): Promise<void> => {
     if (!secret.trim()) return;
     setSaving(true);
     setError(null);
@@ -698,10 +729,29 @@ function ProviderStep({
     }
   };
 
+  const runOauthLogin = async (): Promise<void> => {
+    setSaving(true);
+    setError(null);
+    setLoginLog([]);
+    try {
+      const code = await api().invoke('onboarding.runProviderLogin', { provider });
+      if (code === 0) setDone(true);
+      else setError(`moxxy login exit ${code}`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <StepCard
       title="Connect a provider"
-      sub="Drop in an API key from your provider. It's encrypted by the moxxy vault."
+      sub={
+        authKind === 'oauth'
+          ? "We'll open your browser to finish signing in. Tokens land in the vault, encrypted."
+          : "Drop in an API key from your provider. It's encrypted by the moxxy vault."
+      }
     >
       <div
         style={{
@@ -726,33 +776,68 @@ function ProviderStep({
             {catalog.map((name) => (
               <option key={name} value={name}>
                 {name}
+                {name === 'openai-codex' ? ' · OAuth' : ''}
               </option>
             ))}
           </select>
         </label>
-        <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--color-text-muted)' }}>
-            API key
-          </span>
-          <input
-            type="password"
-            autoComplete="off"
-            spellCheck={false}
-            value={secret}
-            onChange={(e) => setSecret(e.target.value)}
-            placeholder="sk-…"
-            style={inputStyle}
-          />
-        </label>
+        {authKind === 'api-key' && (
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--color-text-muted)' }}>
+              API key
+            </span>
+            <input
+              type="password"
+              autoComplete="off"
+              spellCheck={false}
+              value={secret}
+              onChange={(e) => setSecret(e.target.value)}
+              placeholder="sk-…"
+              style={inputStyle}
+            />
+          </label>
+        )}
         {error && (
           <p role="alert" style={{ margin: 0, fontSize: 12, color: 'var(--color-red)' }}>
             {error}
           </p>
         )}
-        {done && <SuccessRow text="Key saved to the vault." />}
-        <PrimaryButton onClick={() => void save()} disabled={saving || !secret.trim()}>
-          {saving ? 'Saving…' : done ? 'Update key' : 'Save key'}
-        </PrimaryButton>
+        {done && (
+          <SuccessRow
+            text={
+              authKind === 'oauth'
+                ? `Signed in to ${provider}.`
+                : 'Key saved to the vault.'
+            }
+          />
+        )}
+        {authKind === 'oauth' ? (
+          <PrimaryButton onClick={() => void runOauthLogin()} disabled={saving}>
+            {saving ? 'Waiting for browser…' : done ? `Re-link ${provider}` : `Sign in with ${provider}`}
+          </PrimaryButton>
+        ) : (
+          <PrimaryButton onClick={() => void saveKey()} disabled={saving || !secret.trim()}>
+            {saving ? 'Saving…' : done ? 'Update key' : 'Save key'}
+          </PrimaryButton>
+        )}
+        {authKind === 'oauth' && loginLog.length > 0 && (
+          <pre
+            className="mono"
+            style={{
+              margin: 0,
+              padding: 10,
+              background: '#0f172a',
+              color: '#e2e8f0',
+              borderRadius: 10,
+              fontSize: 11,
+              maxHeight: 140,
+              overflow: 'auto',
+              whiteSpace: 'pre-wrap',
+            }}
+          >
+            {loginLog.slice(-20).join('\n')}
+          </pre>
+        )}
       </div>
       <Nav onBack={onBack} onNext={onNext} nextLabel={done ? 'Continue' : 'Skip for now'} />
     </StepCard>

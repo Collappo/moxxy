@@ -222,6 +222,13 @@ export interface IpcCommands {
    *  on stdin, then call `provider.setActive` on the running session
    *  so the next turn picks it up without a relaunch. */
   'onboarding.saveProviderKey': (args: { provider: string; secret: string }) => Promise<void>;
+  /** Returns how a provider authenticates so the wizard can pick the
+   *  right UI affordance: a key field vs an OAuth button. */
+  'onboarding.providerAuthKind': (args: { provider: string }) => Promise<'oauth' | 'api-key'>;
+  /** Spawn `moxxy login <provider>`. The CLI opens the browser and
+   *  runs the OAuth flow. stdout/stderr are streamed via
+   *  `onboarding.install.progress`. Resolves with the exit code. */
+  'onboarding.runProviderLogin': (args: { provider: string }) => Promise<number>;
 
   'desks.list': () => Promise<DesksOverview>;
   'desks.create': (args: { name: string; cwd: string }) => Promise<Desk>;

@@ -92,6 +92,40 @@ export async function installMoxxyCli(window: BrowserWindow): Promise<number> {
   });
 }
 
+/**
+ * Spawn `moxxy login <provider>`. The CLI runs the provider's OAuth
+ * flow — opens the system browser to the provider's auth page and
+ * listens for the loopback callback — then stores the resulting
+ * tokens in the vault.
+ *
+ * stdout + stderr stream back to the renderer via the same channel
+ * the npm install uses (`onboarding.install.progress`). Resolves
+ * with the exit code; the wizard treats 0 as "logged in".
+ */
+export async function runProviderLogin(
+  provider: string,
+  window: BrowserWindow,
+): Promise<number> {
+  const { resolveMoxxyCli, augmentedPaths } = await import('./cli-resolver');
+  const cli = resolveMoxxyCli({ extraPaths: augmentedPaths() });
+  if (!cli) throw new Error('moxxy CLI not found — run the install step first');
+
+  emit(window, `$ moxxy login ${provider}`);
+
+  return new Promise<number>((resolve, reject) => {
+    const proc =
+      cli.kind === 'direct'
+        ? spawn(cli.bin, ['login', provider], { stdio: ['ignore', 'pipe', 'pipe'] })
+        : spawn('node', [cli.entry, 'login', provider], {
+            stdio: ['ignore', 'pipe', 'pipe'],
+          });
+    proc.stdout?.on('data', (b: Buffer) => stream(window, b.toString()));
+    proc.stderr?.on('data', (b: Buffer) => stream(window, b.toString()));
+    proc.on('error', reject);
+    proc.on('exit', (code) => resolve(code ?? -1));
+  });
+}
+
 function findExe(name: string): string | null {
   const PATH = process.env.PATH ?? '';
   const dirs = PATH.split(':').concat(augmentedPaths()).filter(Boolean);
