@@ -18,11 +18,11 @@
   --color-text-muted:    #475569;
   --color-text-dim:      #94a3b8;
 
-  /* Sidebar — soft off-white with a subtle cool gray tint, so the
-   * column reads as "lite white" against the lavender canvas without
-   * looking flat. */
-  --color-sidebar-bg:        #f8f9fc;
-  --color-sidebar-bg-hover:  #eef0f6;
+  /* Sidebar — pure white. The chat column sits a hair off-white
+   * (rgb(252,252,255)) so the columns still register as separate
+   * against each other and against the lavender canvas. */
+  --color-sidebar-bg:        #ffffff;
+  --color-sidebar-bg-hover:  #f4f5fb;
   --color-sidebar-bg-active: #fdf2f8;   /* brand-pink wash for the active row */
   --color-sidebar-text:      #0f172a;
   --color-sidebar-text-dim:  #6b7194;
