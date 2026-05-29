@@ -34,30 +34,14 @@ export default defineConfig({
       alias: {
         '@': path.resolve(__dirname, 'src'),
         '@shared': path.resolve(__dirname, 'electron/shared'),
-        // @clerk/elements optionally peers on Next.js for SSR. We're
-        // a plain Vite + Electron app; satisfy the imports with no-op
-        // shims so the bundle doesn't try to resolve real Next.
-        'next/compat/router': path.resolve(__dirname, 'src/lib/next-compat-shim.ts'),
-        'next/navigation': path.resolve(__dirname, 'src/lib/next-compat-shim.ts'),
-        'next/router': path.resolve(__dirname, 'src/lib/next-compat-shim.ts'),
       },
-      // pnpm's symlink layout can give @clerk/elements its own copy of
-      // @clerk/clerk-react. That'd create a second React-context tree
-      // — useClerk reads from the elements-side copy, ClerkProvider
-      // mounts on the wizard-side copy, no overlap → the
-      // "useClerk can only be used within <ClerkProvider/>" runtime
-      // error. Force a single copy by name.
-      dedupe: [
-        '@clerk/clerk-react',
-        '@clerk/shared',
-        'react',
-        'react-dom',
-      ],
-    },
-    optimizeDeps: {
-      // Pre-bundle Clerk packages so the dev-server's on-the-fly ESM
-      // resolution doesn't fall back to a second copy of clerk-react.
-      include: ['@clerk/clerk-react', '@clerk/elements'],
+      // Dedupe React + clerk-react so the wizard's ClerkProvider and
+      // any hook that reads Clerk context share a single React tree
+      // (pnpm's symlink layout can produce two copies otherwise).
+      // We DON'T dedupe @clerk/shared — its sub-path exports
+      // (e.g. /loadClerkJsScript) can't be resolved when dedupe
+      // collapses it.
+      dedupe: ['@clerk/clerk-react', 'react', 'react-dom'],
     },
     build: {
       outDir: 'dist',
