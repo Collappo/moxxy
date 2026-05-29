@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from './api';
+import { toErrorMessage } from './errors';
 import type { WorkflowRun, WorkflowSummary } from '@moxxy/desktop-ipc-contract';
 
 export interface UseWorkflows {
@@ -25,7 +26,7 @@ export function useWorkflows(): UseWorkflows {
       setList(next);
       setError(null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(toErrorMessage(e));
     } finally {
       setLoading(false);
     }
@@ -46,7 +47,7 @@ export function useWorkflows(): UseWorkflows {
         await refresh();
       } catch (e) {
         setList(prev);
-        setError(e instanceof Error ? e.message : String(e));
+        setError(toErrorMessage(e));
       }
     },
     [list, refresh],
@@ -58,7 +59,7 @@ export function useWorkflows(): UseWorkflows {
         const result = await api().invoke('workflows.run', { name });
         setLastRun({ name, result });
       } catch (e) {
-        setError(e instanceof Error ? e.message : String(e));
+        setError(toErrorMessage(e));
       }
     },
     [],

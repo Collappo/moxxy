@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { toErrorMessage } from '@/lib/errors';
 import type { ConnectionPhase, NodeProbe, OnboardingStatus } from '@moxxy/desktop-ipc-contract';
 import { useOnboarding } from '@/lib/useOnboarding';
 
@@ -284,7 +285,7 @@ function ProviderStep({
       await ob.saveProviderKey({ provider, secret: secret.trim() });
       setSecret('');
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(toErrorMessage(e));
     } finally {
       setSaving(false);
     }

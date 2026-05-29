@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from './api';
+import { toErrorMessage } from './errors';
 import { connectionStore } from './useConnection';
 import type { Desk, DesksOverview } from '@moxxy/desktop-ipc-contract';
 
@@ -33,7 +34,7 @@ export function useDesks(): UseDesks {
       setOverview(next);
       setError(null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(toErrorMessage(e));
     } finally {
       setLoading(false);
     }
@@ -55,7 +56,7 @@ export function useDesks(): UseDesks {
         await refresh();
         return desk;
       } catch (e) {
-        setError(e instanceof Error ? e.message : String(e));
+        setError(toErrorMessage(e));
         return null;
       }
     },
@@ -68,7 +69,7 @@ export function useDesks(): UseDesks {
         await api().invoke('desks.remove', { id });
         await refresh();
       } catch (e) {
-        setError(e instanceof Error ? e.message : String(e));
+        setError(toErrorMessage(e));
       }
     },
     [refresh],
@@ -93,7 +94,7 @@ export function useDesks(): UseDesks {
       } catch (e) {
         setOverview((o) => ({ ...o, activeId: prev }));
         if (prev) connectionStore.setActive(prev);
-        setError(e instanceof Error ? e.message : String(e));
+        setError(toErrorMessage(e));
       }
     },
     [overview.activeId, refresh],
@@ -105,7 +106,7 @@ export function useDesks(): UseDesks {
         await api().invoke('desks.rename', { id, name });
         await refresh();
       } catch (e) {
-        setError(e instanceof Error ? e.message : String(e));
+        setError(toErrorMessage(e));
       }
     },
     [refresh],

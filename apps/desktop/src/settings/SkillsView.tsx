@@ -17,6 +17,7 @@
  */
 
 import { useEffect, useState } from 'react';
+import { toErrorMessage } from '@/lib/errors';
 import { useActiveWorkspaceId } from '@/lib/useConnection';
 import { chatStore } from '@/lib/chatStore';
 import { api } from '@/lib/api';
@@ -684,7 +685,7 @@ function GenerateSkillModal({
       chatStore.dispatch(workspaceId, { type: 'send_started', turnId: id });
     } catch (e) {
       setPhase('error');
-      setError(e instanceof Error ? e.message : String(e));
+      setError(toErrorMessage(e));
     }
   };
 

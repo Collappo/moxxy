@@ -16,6 +16,7 @@
  */
 
 import { useEffect, useMemo, useState } from 'react';
+import { toErrorMessage } from '@/lib/errors';
 import { api } from '@/lib/api';
 import { chatStore } from '@/lib/chatStore';
 import { Icon } from '@/lib/Icon';
@@ -159,7 +160,7 @@ export function CommandPalette({ workspaceId, onClose }: Props): JSX.Element {
         commandName: command.name,
         argsLine: argString,
         tone: 'error',
-        text: e instanceof Error ? e.message : String(e),
+        text: toErrorMessage(e),
       });
       onClose();
     } finally {

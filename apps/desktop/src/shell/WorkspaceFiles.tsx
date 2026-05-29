@@ -11,6 +11,7 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
+import { toErrorMessage } from '@/lib/errors';
 import { api } from '@/lib/api';
 import { Icon } from '@/lib/Icon';
 
@@ -91,7 +92,7 @@ export function WorkspaceFiles({
             path: relPath,
             entries: cur[relPath]?.entries ?? [],
             loading: false,
-            error: e instanceof Error ? e.message : String(e),
+            error: toErrorMessage(e),
           },
         }));
       }

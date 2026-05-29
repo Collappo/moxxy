@@ -14,6 +14,7 @@
  */
 
 import { useEffect, useState, useSyncExternalStore } from 'react';
+import { toErrorMessage } from '@/lib/errors';
 import { api } from '@/lib/api';
 import { chatStore } from '@/lib/chatStore';
 import { Modal } from '@/lib/Modal';
@@ -317,7 +318,7 @@ function ProviderModelPicker({
       setFetchState({
         provider: hoveredProvider,
         status: 'error',
-        error: e instanceof Error ? e.message : String(e),
+        error: toErrorMessage(e),
       });
     }
   };

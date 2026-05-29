@@ -3,6 +3,7 @@ import { api } from './api';
 import type { MoxxyEvent } from '@moxxy/sdk';
 import { chatStore, EMPTY_SNAPSHOT } from './chatStore';
 import { createIpcPersistence, migrateLegacyChats } from './chatPersistence';
+import { toErrorMessage } from './errors';
 import type { Extension } from './chatModel';
 
 export type { Extension, RenderNode, FoldedBlock } from './chatModel';
@@ -53,7 +54,7 @@ async function sendImmediate(
   } catch (e) {
     chatStore.dispatch(workspaceId, {
       type: 'send_failed',
-      message: e instanceof Error ? e.message : String(e),
+      message: toErrorMessage(e),
     });
   }
 }

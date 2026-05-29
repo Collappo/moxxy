@@ -21,6 +21,7 @@
  */
 
 import { useEffect, useState } from 'react';
+import { toErrorMessage } from '@/lib/errors';
 import { SignedIn, SignedOut, SignIn, useUser } from '@clerk/clerk-react';
 import { api } from '@/lib/api';
 import { usePrefs } from '@/lib/usePrefs';
@@ -573,7 +574,7 @@ function CliStep({
       }
     } catch (e) {
       setState('failed');
-      setError(e instanceof Error ? e.message : String(e));
+      setError(toErrorMessage(e));
     }
   };
 
@@ -714,7 +715,7 @@ function ProviderStep({
       setSecret('');
       setDone(true);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(toErrorMessage(e));
     } finally {
       setSaving(false);
     }
@@ -729,7 +730,7 @@ function ProviderStep({
       if (code === 0) setDone(true);
       else setError(`moxxy login exit ${code}`);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(toErrorMessage(e));
     } finally {
       setSaving(false);
     }

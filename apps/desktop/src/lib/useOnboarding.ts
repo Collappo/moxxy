@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from './api';
+import { toErrorMessage } from './errors';
 import type {
   ConnectionPhase,
   NodeProbe,
@@ -81,7 +82,7 @@ export function useOnboarding(phase?: ConnectionPhase): UseOnboarding {
       await refresh();
       return code;
     } catch (e) {
-      setInstallError(e instanceof Error ? e.message : String(e));
+      setInstallError(toErrorMessage(e));
       return null;
     } finally {
       setInstalling(false);

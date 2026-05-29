@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from './api';
+import { toErrorMessage } from './errors';
 import type {
   McpServerEntry,
   ProviderEntry,
@@ -44,7 +45,7 @@ export function useSettings(): UseSettings {
       setSkills(s);
       setError(null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(toErrorMessage(e));
     } finally {
       setLoading(false);
     }
@@ -60,7 +61,7 @@ export function useSettings(): UseSettings {
         await api().invoke('settings.mcpToggle', { name, enabled });
         await refresh();
       } catch (e) {
-        setError(e instanceof Error ? e.message : String(e));
+        setError(toErrorMessage(e));
       }
     },
     [refresh],
@@ -77,7 +78,7 @@ export function useSettings(): UseSettings {
         await api().invoke('settings.writeSkill', { name, body });
         await refresh();
       } catch (e) {
-        setError(e instanceof Error ? e.message : String(e));
+        setError(toErrorMessage(e));
       }
     },
     [refresh],
@@ -89,7 +90,7 @@ export function useSettings(): UseSettings {
         await api().invoke('settings.deleteSkill', { name });
         await refresh();
       } catch (e) {
-        setError(e instanceof Error ? e.message : String(e));
+        setError(toErrorMessage(e));
       }
     },
     [refresh],
