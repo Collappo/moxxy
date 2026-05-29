@@ -112,11 +112,13 @@ code, kbd, pre, .mono { font-family: var(--font-mono); }
 .col-rail {
   width: 296px;
   flex-shrink: 0;
-  padding: 16px 14px 16px 18px;
+  padding: 16px 18px 16px 18px;
   display: flex;
   flex-direction: column;
   gap: 14px;
   overflow-y: auto;
+  border-right: 1px solid var(--color-card-border);
+  background: var(--color-app-bg);
 }
 
 .col-main {
