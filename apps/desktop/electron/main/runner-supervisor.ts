@@ -293,6 +293,10 @@ export class RunnerSupervisor extends EventEmitter {
     const env = {
       ...process.env,
       MOXXY_RUNNER_SOCKET: this.socketPath,
+      // Desktop owns the UI; we don't need the co-attached web
+      // surface, and binding its fixed port (4040) breaks the moment
+      // a second workspace runner spawns.
+      MOXXY_NO_WEB_SURFACE: '1',
     };
     const spawnOpts: import('node:child_process').SpawnOptions = {
       env,

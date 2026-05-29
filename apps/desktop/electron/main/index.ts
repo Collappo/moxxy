@@ -15,6 +15,7 @@ import { fileURLToPath } from 'node:url';
 import { RunnerPool, UNBOUND_ID } from './runner-pool';
 import { bindWindow, registerIpcHandlers } from './ipc';
 import { DeskStore } from './desks';
+import { sweepStaleSockets } from './sweep-sockets';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -56,6 +57,22 @@ async function createWindow(): Promise<void> {
 }
 
 app.whenReady().then(async () => {
+  // Reap any orphan runners from a previous crashed desktop process
+  // before we try to spawn new ones. Without this, the first workspace
+  // a returning user opens hits EADDRINUSE because a zombie moxxy serve
+  // still has 4040 (or the workspace's unix socket) bound.
+  const swept = await sweepStaleSockets();
+  if (swept.killed.length || swept.removed.length) {
+    // eslint-disable-next-line no-console
+    console.log(
+      `[moxxy] swept ${swept.removed.length} stale socket(s), killed ${swept.killed.length} orphan pid(s)`,
+    );
+  }
+  for (const err of swept.errors) {
+    // eslint-disable-next-line no-console
+    console.warn('[moxxy] sweep:', err);
+  }
+
   pool = new RunnerPool();
   const desks = new DeskStore();
   // Prime: spawn a runner for the active workspace if one is bound,
