@@ -119,6 +119,11 @@ interface LatestBlock {
 // drag region so the user can grab the widget by the (visually empty)
 // corner area; the button itself is no-drag so the click reaches us.
 
+/* The dot mode is intentionally stateless + inline-styled so it
+ * cannot flicker, fail to render, or become unclickable due to
+ * CSS-loading races, useState/useEffect ordering, or image-load
+ * onError flips. Every previous "blank tile" regression came from
+ * something dynamic happening here — keep this dumb. */
 function DotMode({
   onExpand,
   sending,
@@ -126,43 +131,50 @@ function DotMode({
   readonly onExpand: () => void;
   readonly sending: boolean;
 }): JSX.Element {
-  const drag = { WebkitAppRegion: 'drag' } as React.CSSProperties;
-  const noDrag = { WebkitAppRegion: 'no-drag' } as React.CSSProperties;
-  // Track whether the logo PNG failed to load so we can swap in a
-  // text fallback. Previously when the bundler couldn't resolve
-  // /logo.png in the focus window's renderer, the dot rendered as
-  // a featureless white tile with no clickable affordance.
-  const [logoFailed, setLogoFailed] = useState(false);
   return (
-    <div className="focus-dot__shell" style={drag}>
+    <div
+      // 4 px transparent ring around the button = drag handle for
+      // the user's corner-drag request.
+      style={{
+        width: '100%',
+        height: '100%',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: 4,
+        boxSizing: 'border-box',
+        WebkitAppRegion: 'drag',
+      } as React.CSSProperties}
+    >
       <button
         type="button"
         onClick={onExpand}
         aria-label="moxxy · click to expand"
-        className="focus-dot"
-        data-busy={sending ? 'true' : 'false'}
-        style={noDrag}
+        style={{
+          width: 36,
+          height: 36,
+          padding: 0,
+          margin: 0,
+          background: '#ffffff',
+          border: '1px solid rgba(15, 23, 42, 0.12)',
+          borderRadius: 10,
+          boxShadow: sending
+            ? '0 0 0 2px rgba(236, 72, 153, 0.55), 0 6px 14px -6px rgba(236, 72, 153, 0.35)'
+            : '0 6px 14px -6px rgba(15, 23, 42, 0.25), 0 2px 4px -2px rgba(15, 23, 42, 0.15)',
+          cursor: 'pointer',
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          fontSize: 18,
+          fontWeight: 800,
+          color: '#ec4899',
+          letterSpacing: '-0.02em',
+          fontFamily: 'Inter, system-ui, sans-serif',
+          WebkitAppRegion: 'no-drag',
+          transition: 'transform 120ms ease, box-shadow 200ms ease',
+        } as React.CSSProperties}
       >
-        {logoFailed ? (
-          <span
-            style={{
-              fontSize: 18,
-              fontWeight: 800,
-              color: 'var(--color-primary-strong)',
-              letterSpacing: '-0.02em',
-            }}
-            aria-hidden
-          >
-            m
-          </span>
-        ) : (
-          <img
-            src="./logo.png"
-            alt="moxxy"
-            draggable={false}
-            onError={() => setLogoFailed(true)}
-          />
-        )}
+        m
       </button>
     </div>
   );

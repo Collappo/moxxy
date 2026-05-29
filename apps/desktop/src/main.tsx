@@ -41,6 +41,12 @@ const Tree = isFocus ? (
   <App />
 );
 
+// Skip StrictMode for the focus widget. StrictMode's intentional
+// double-mount is fine for the main app but plays poorly with the
+// floating widget — useEffects fire twice, the focus.resize IPC
+// runs twice on first mount, and the renderer briefly flickers
+// while the second mount is reconciling. Keep the safety net for
+// the full app surface, drop it for the 44×44 widget.
 ReactDOM.createRoot(root).render(
-  <React.StrictMode>{Tree}</React.StrictMode>,
+  isFocus ? Tree : <React.StrictMode>{Tree}</React.StrictMode>,
 );
