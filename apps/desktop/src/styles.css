@@ -193,9 +193,7 @@ code, kbd, pre, .mono { font-family: var(--font-mono); }
   flex-direction: column;
   padding: 16px 18px 16px 4px;
   min-width: 0;
-  /* Warm cream — matches the gif avatar's checker background so the
-   * empty-state hero blends seamlessly into the column. */
-  background: #fcf5cc;
+  background: var(--color-card-bg);
 }
 
 /* `col-main--flat` removes the inset gutters so the chat content
