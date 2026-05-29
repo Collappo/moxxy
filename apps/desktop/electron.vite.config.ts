@@ -41,6 +41,23 @@ export default defineConfig({
         'next/navigation': path.resolve(__dirname, 'src/lib/next-compat-shim.ts'),
         'next/router': path.resolve(__dirname, 'src/lib/next-compat-shim.ts'),
       },
+      // pnpm's symlink layout can give @clerk/elements its own copy of
+      // @clerk/clerk-react. That'd create a second React-context tree
+      // — useClerk reads from the elements-side copy, ClerkProvider
+      // mounts on the wizard-side copy, no overlap → the
+      // "useClerk can only be used within <ClerkProvider/>" runtime
+      // error. Force a single copy by name.
+      dedupe: [
+        '@clerk/clerk-react',
+        '@clerk/shared',
+        'react',
+        'react-dom',
+      ],
+    },
+    optimizeDeps: {
+      // Pre-bundle Clerk packages so the dev-server's on-the-fly ESM
+      // resolution doesn't fall back to a second copy of clerk-react.
+      include: ['@clerk/clerk-react', '@clerk/elements'],
     },
     build: {
       outDir: 'dist',
