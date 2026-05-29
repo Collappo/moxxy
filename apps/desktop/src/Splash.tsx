@@ -31,26 +31,19 @@ export function Splash({
         color: 'var(--color-text)',
       }}
     >
-      <div
-        aria-hidden
+      <img
+        src="/logo.png"
+        alt="moxxy"
+        width={72}
+        height={72}
         style={{
-          width: 56,
-          height: 56,
-          borderRadius: 'var(--radius-block)',
-          background:
-            'linear-gradient(135deg, var(--color-primary), var(--color-accent))',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          fontFamily: 'var(--font-mono)',
-          fontWeight: 700,
-          fontSize: '1.5rem',
-          color: 'var(--color-bg)',
-          boxShadow: '0 0 36px rgba(129, 140, 248, 0.35)',
+          width: 72,
+          height: 72,
+          borderRadius: 14,
+          imageRendering: 'pixelated',
+          boxShadow: '0 12px 28px rgba(99, 102, 241, 0.25)',
         }}
-      >
-        m
-      </div>
+      />
       <div
         aria-hidden
         style={{

@@ -291,24 +291,19 @@ function Logo(): JSX.Element {
         padding: '18px 18px 14px',
       }}
     >
-      <span
-        aria-hidden
+      <img
+        src="/logo.png"
+        alt="moxxy"
+        width={32}
+        height={32}
         style={{
-          width: 28,
-          height: 28,
+          width: 32,
+          height: 32,
           borderRadius: 8,
-          background: 'linear-gradient(135deg, #6366f1, #818cf8)',
-          display: 'inline-flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          color: '#fff',
-          fontFamily: 'var(--font-mono)',
-          fontWeight: 700,
-          fontSize: 14,
+          imageRendering: 'pixelated',
+          flexShrink: 0,
         }}
-      >
-        m
-      </span>
+      />
       <span style={{ fontSize: 15, fontWeight: 700, letterSpacing: '-0.01em' }}>
         moxxy
       </span>

@@ -25,14 +25,24 @@ let pool: RunnerPool | null = null;
 let mainWindow: BrowserWindow | null = null;
 
 async function createWindow(): Promise<void> {
+  // The renderer is served either from Vite's dev server or from the
+  // packaged dist/. The window icon needs a filesystem path though
+  // (Electron doesn't accept http:// urls for `icon`), so we resolve
+  // it relative to the built dist/ in prod and the renderer source
+  // in dev.
+  const iconPath = isDev
+    ? path.join(__dirname, '..', '..', '..', 'public', 'logo.png')
+    : path.join(__dirname, '..', '..', 'dist', 'logo.png');
+
   mainWindow = new BrowserWindow({
     title: 'moxxy',
     width: 1180,
     height: 760,
     minWidth: 720,
     minHeight: 480,
-    backgroundColor: '#08080c',
+    backgroundColor: '#f7f8fc',
     autoHideMenuBar: true,
+    icon: iconPath,
     webPreferences: {
       preload: path.join(__dirname, '..', 'preload', 'index.mjs'),
       contextIsolation: true,
