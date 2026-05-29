@@ -35,11 +35,41 @@ export const __reducerForTest = {
   apply: chatReducer,
 };
 
+/** Fire a turn against the runner without queueing checks. Shared by
+ *  the public `useChat().send` and the queue drainer. */
+async function sendImmediate(
+  workspaceId: string,
+  prompt: string,
+  attachments?: ReadonlyArray<{ path: string; name: string }>,
+): Promise<void> {
+  const model = chatStore.getModel(workspaceId);
+  try {
+    const { turnId } = await api().invoke('session.runTurn', {
+      workspaceId,
+      prompt,
+      ...(model ? { model } : {}),
+      ...(attachments && attachments.length > 0 ? { attachments } : {}),
+    });
+    chatStore.dispatch(workspaceId, {
+      type: 'send_started',
+      turnId,
+      prompt,
+      ...(attachments && attachments.length > 0 ? { attachments } : {}),
+    });
+  } catch (e) {
+    chatStore.dispatch(workspaceId, {
+      type: 'send_failed',
+      message: e instanceof Error ? e.message : String(e),
+    });
+  }
+}
+
 /**
  * Bridge component — forwards `runner.event` / `runner.turn.complete`
  * from the main process into the workspace-keyed {@link chatStore},
- * and rehydrates the persisted conversation on first mount so
- * transcripts survive restarts.
+ * drains the per-workspace queue when a turn completes, and
+ * rehydrates the persisted conversation on first mount so transcripts
+ * survive restarts.
  */
 export function ChatStoreBridge(): null {
   useEffect(() => {
@@ -62,6 +92,12 @@ export function ChatStoreBridge(): null {
         error: string | null;
       }) => {
         chatStore.dispatch(workspaceId, { type: 'turn_complete', turnId, error });
+        // Drain one queued turn (if any). The next turn.complete will
+        // drain the one after that, etc.
+        const next = chatStore.shiftQueue(workspaceId);
+        if (next) {
+          void sendImmediate(workspaceId, next.prompt, next.attachments);
+        }
       },
     );
     return () => {
@@ -70,6 +106,16 @@ export function ChatStoreBridge(): null {
     };
   }, []);
   return null;
+}
+
+/** Read the queue snapshot for a workspace. Used by the composer to
+ *  render the pending-sends preview. */
+export function useQueuedTurns(
+  workspaceId: string | null,
+): ReadonlyArray<{ readonly id: string; readonly prompt: string }> {
+  return useSyncExternalStore(chatStore.subscribe, () =>
+    workspaceId ? chatStore.getQueue(workspaceId) : [],
+  );
 }
 
 /**
@@ -90,26 +136,17 @@ export function useChat(workspaceId: string | null): UseChat {
       if (!workspaceId) return;
       const trimmed = prompt.trim();
       if (!trimmed && (!attachments || attachments.length === 0)) return;
-      const model = chatStore.getModel(workspaceId);
-      try {
-        const { turnId } = await api().invoke('session.runTurn', {
-          workspaceId,
-          prompt: trimmed,
-          ...(model ? { model } : {}),
-          ...(attachments && attachments.length > 0 ? { attachments } : {}),
-        });
-        chatStore.dispatch(workspaceId, {
-          type: 'send_started',
-          turnId,
-          prompt: trimmed,
-          ...(attachments && attachments.length > 0 ? { attachments } : {}),
-        });
-      } catch (e) {
-        chatStore.dispatch(workspaceId, {
-          type: 'send_failed',
-          message: e instanceof Error ? e.message : String(e),
-        });
+      // If a turn is already running for this workspace, queue this
+      // one instead of firing it immediately. The QueueDrainer (in
+      // ChatStoreBridge) pops the queue on turn_complete and sends
+      // the next one — same path as if the user had hit Enter
+      // manually right after the previous turn finished.
+      const cur = chatStore.getChat(workspaceId);
+      if (cur.activeTurnId !== null || cur.sending) {
+        chatStore.enqueue(workspaceId, trimmed, attachments);
+        return;
       }
+      await sendImmediate(workspaceId, trimmed, attachments);
     },
     [workspaceId],
   );

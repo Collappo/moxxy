@@ -18,18 +18,29 @@ import {
   type ChatState,
 } from './chatReducer';
 
+/** One queued turn — the user hit Enter while a previous turn was in
+ *  flight. Drained automatically when the active turn completes. */
+export interface QueuedTurn {
+  readonly id: string;
+  readonly prompt: string;
+  readonly attachments?: ReadonlyArray<{ path: string; name: string }>;
+}
+
 interface InternalChat extends ChatState {
   lastSeenSeq: number;
   /** Per-workspace model override. The runner exposes runTurn(prompt,
    *  {model}) per-turn; we sticky it client-side so the user can pick
    *  once in the configure modal and have it apply to every send. */
   model: string | null;
+  /** Pending sends queued while a previous turn is still in flight. */
+  queue: ReadonlyArray<QueuedTurn>;
 }
 
 const blankChat = (): InternalChat => ({
   ...initialChatState,
   lastSeenSeq: 0,
   model: null,
+  queue: [],
 });
 
 /** localStorage namespace prefix. One key per workspace
@@ -163,6 +174,52 @@ class ChatStore {
     const cur = this.ensure(workspaceId);
     if (cur.model === model) return;
     cur.model = model;
+    this.emit();
+  }
+
+  /** Read the queue for a workspace. Used by the composer to show
+   *  pending sends. */
+  getQueue(workspaceId: string): ReadonlyArray<QueuedTurn> {
+    return this.chats.get(workspaceId)?.queue ?? [];
+  }
+
+  /** Push a turn onto the queue. Returns the queued turn id. */
+  enqueue(
+    workspaceId: string,
+    prompt: string,
+    attachments?: ReadonlyArray<{ path: string; name: string }>,
+  ): string {
+    const cur = this.ensure(workspaceId);
+    const id = `q-${cur.seq}-${cur.queue.length}`;
+    cur.queue = [
+      ...cur.queue,
+      attachments && attachments.length > 0
+        ? { id, prompt, attachments }
+        : { id, prompt },
+    ];
+    this.persist(workspaceId);
+    this.emit();
+    return id;
+  }
+
+  /** Pop the head of the queue (called when a turn completes and the
+   *  bridge wants to send the next one). */
+  shiftQueue(workspaceId: string): QueuedTurn | null {
+    const cur = this.chats.get(workspaceId);
+    if (!cur || cur.queue.length === 0) return null;
+    const [head, ...rest] = cur.queue;
+    cur.queue = rest;
+    this.persist(workspaceId);
+    this.emit();
+    return head ?? null;
+  }
+
+  /** Remove an entry from the queue (user hit × on a pending chip). */
+  dropFromQueue(workspaceId: string, id: string): void {
+    const cur = this.chats.get(workspaceId);
+    if (!cur) return;
+    cur.queue = cur.queue.filter((q) => q.id !== id);
+    this.persist(workspaceId);
     this.emit();
   }
 

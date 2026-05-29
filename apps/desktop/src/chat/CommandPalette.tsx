@@ -117,12 +117,15 @@ export function CommandPalette({ workspaceId, onClose }: Props): JSX.Element {
         name: command.name,
         args: argString,
       });
-      const tone =
-        result.kind === 'error'
-          ? 'error'
-          : result.kind === 'session-action'
-            ? 'notice'
-            : 'info';
+      // 'clear' is a side-effect-only directive — wipe transcript
+      // BEFORE dispatching, otherwise the result card would land in
+      // the cleared transcript and immediately disappear.
+      if (result.kind === 'session-action' && result.action === 'clear') {
+        chatStore.clear(workspaceId);
+      }
+      // Don't render an action_result block for pure side-effects /
+      // noops; the empty header bar that we used to leave in the
+      // chat after a noop command was confusing.
       const text =
         result.kind === 'text'
           ? result.text ?? ''
@@ -131,19 +134,24 @@ export function CommandPalette({ workspaceId, onClose }: Props): JSX.Element {
             : result.kind === 'session-action'
               ? result.notice ?? ''
               : '';
-      // 'clear' is a side-effect-only directive — wipe transcript
-      // BEFORE dispatching, otherwise the result card would land in
-      // the cleared transcript and immediately disappear.
-      if (result.kind === 'session-action' && result.action === 'clear') {
-        chatStore.clear(workspaceId);
+      const isSilent =
+        result.kind === 'noop' ||
+        (result.kind === 'session-action' && !text.trim() && !result.notice);
+      if (!isSilent) {
+        const tone =
+          result.kind === 'error'
+            ? 'error'
+            : result.kind === 'session-action'
+              ? 'notice'
+              : 'info';
+        chatStore.dispatch(workspaceId, {
+          type: 'action_result',
+          commandName: command.name,
+          argsLine: argString,
+          tone,
+          text,
+        });
       }
-      chatStore.dispatch(workspaceId, {
-        type: 'action_result',
-        commandName: command.name,
-        argsLine: argString,
-        tone,
-        text,
-      });
       onClose();
     } catch (e) {
       chatStore.dispatch(workspaceId, {

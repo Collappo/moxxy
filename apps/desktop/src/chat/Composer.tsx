@@ -7,6 +7,8 @@ import {
 } from 'react';
 import { Icon } from '@/lib/Icon';
 import { api } from '@/lib/api';
+import { useQueuedTurns } from '@/lib/useChat';
+import { chatStore } from '@/lib/chatStore';
 import { AgentPicker } from './AgentPicker';
 import { CommandPalette } from './CommandPalette';
 import { FILE_INSERT_EVENT, type FileInsertDetail } from '@/shell/WorkspaceFiles';
@@ -72,8 +74,12 @@ export function Composer({
     setAttachments((cur) => cur.filter((a) => a.path !== path));
   };
   const inFlight = activeTurnId !== null || sending;
+  // The user can type / submit even while a turn is running — the
+  // send() call queues it; the drainer ships it the moment the
+  // current turn completes.
   const canSubmit =
-    ready && !inFlight && (draft.trim().length > 0 || attachments.length > 0);
+    ready && (draft.trim().length > 0 || attachments.length > 0);
+  const queued = useQueuedTurns(workspaceId);
 
   // The context rail's file tree fires a CustomEvent when the user
   // clicks a file. We treat it as an attachment, not text — the
@@ -200,7 +206,7 @@ export function Composer({
         gap: 10,
       }}
     >
-      {attachments.length > 0 && (
+      {(attachments.length > 0 || queued.length > 0) && (
         <div
           style={{
             display: 'flex',
@@ -215,6 +221,13 @@ export function Composer({
               name={a.name}
               path={a.path}
               onRemove={() => removeAttachment(a.path)}
+            />
+          ))}
+          {queued.map((q) => (
+            <QueuedChip
+              key={q.id}
+              text={q.prompt}
+              onRemove={() => chatStore.dropFromQueue(workspaceId, q.id)}
             />
           ))}
         </div>
@@ -233,7 +246,7 @@ export function Composer({
               ? 'Send a message to the agent…'
               : 'Waiting for runner…'
         }
-        disabled={!ready || inFlight}
+        disabled={!ready}
         rows={Math.min(8, Math.max(1, draft.split('\n').length))}
         style={{
           width: '100%',
@@ -408,6 +421,76 @@ function ToolChip({
     >
       {children}
     </button>
+  );
+}
+
+/**
+ * Pending-turn chip for messages the user queued while a previous
+ * turn was still running. Renders with a soft "waiting" pulse so it
+ * reads as pending, not "already sent."
+ */
+function QueuedChip({
+  text,
+  onRemove,
+}: {
+  readonly text: string;
+  readonly onRemove: () => void;
+}): JSX.Element {
+  return (
+    <span
+      title={`Queued · sends when the current turn finishes\n${text}`}
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 6,
+        padding: '4px 4px 4px 10px',
+        background: 'var(--color-primary-soft)',
+        border: '1px dashed var(--color-primary)',
+        borderRadius: 999,
+        fontSize: 12,
+        color: 'var(--color-primary-strong)',
+        fontWeight: 600,
+        maxWidth: 280,
+      }}
+    >
+      <span
+        aria-hidden
+        style={{
+          width: 6,
+          height: 6,
+          borderRadius: '50%',
+          background: 'var(--color-primary-strong)',
+          animation: 'moxxy-thinking 1.1s ease-in-out infinite',
+        }}
+      />
+      <span
+        style={{
+          maxWidth: 220,
+          whiteSpace: 'nowrap',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+        }}
+      >
+        {text || '(attachment only)'}
+      </span>
+      <button
+        type="button"
+        aria-label="Drop queued message"
+        onClick={onRemove}
+        style={{
+          width: 18,
+          height: 18,
+          borderRadius: '50%',
+          background: 'rgba(236, 72, 153, 0.18)',
+          color: 'var(--color-primary-strong)',
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
+        <Icon name="x" size={11} />
+      </button>
+    </span>
   );
 }
 
