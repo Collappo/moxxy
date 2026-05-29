@@ -10,10 +10,9 @@
     "verbatimModuleSyntax": true,
     "allowImportingTsExtensions": true,
     "paths": {
-      "@/*": ["./src/*"],
-      "@shared/*": ["./electron/shared/*"]
+      "@/*": ["./src/*"]
     }
   },
-  "include": ["src/**/*", "electron/shared/**/*"],
+  "include": ["src/**/*"],
   "exclude": ["dist", "dist-electron", "node_modules", "release"]
 }

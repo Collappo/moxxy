@@ -5,7 +5,7 @@
  * directly except via this module.
  */
 
-import type { MoxxyApi } from '@shared/ipc';
+import type { MoxxyApi } from '@moxxy/desktop-ipc-contract';
 
 let override: MoxxyApi | null = null;
 

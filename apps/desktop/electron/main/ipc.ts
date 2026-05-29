@@ -23,7 +23,8 @@ import type {
   IpcCommandName,
   IpcCommands,
   IpcEvents,
-} from '../shared/ipc';
+} from '@moxxy/desktop-ipc-contract';
+import { validateIpcInput } from '@moxxy/desktop-ipc-contract/validation';
 import type { SessionLike } from '@moxxy/sdk';
 import { RunnerSupervisor } from './runner-supervisor';
 import { RunnerPool, UNBOUND_ID } from './runner-pool';
@@ -552,6 +553,11 @@ function handle<K extends IpcCommandName>(
   ) => Promise<Awaited<ReturnType<IpcCommands[K]>>>,
 ): void {
   ipcMain.handle(channel, (_evt, ...args) => {
+    // Runtime-validate the payload at the boundary before any handler
+    // touches the filesystem / a child process / the vault. Schemas
+    // exist only for the security-sensitive commands; the rest pass
+    // through (validateIpcInput is a no-op without a schema).
+    validateIpcInput(channel, args[0]);
     return fn(...(args as Parameters<IpcCommands[K]>));
   });
 }

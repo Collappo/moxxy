@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from './api';
-import type { DesktopPrefs } from '@shared/ipc';
+import type { DesktopPrefs } from '@moxxy/desktop-ipc-contract';
 
 export interface UsePrefs {
   readonly prefs: DesktopPrefs | null;

@@ -15,6 +15,7 @@ const BUNDLED_WORKSPACE_DEPS = [
   '@moxxy/sdk',
   '@moxxy/plugin-vault',
   '@moxxy/plugin-stt-whisper-codex',
+  '@moxxy/desktop-ipc-contract',
 ];
 
 /**
@@ -59,7 +60,6 @@ export default defineConfig({
     resolve: {
       alias: {
         '@': path.resolve(__dirname, 'src'),
-        '@shared': path.resolve(__dirname, 'electron/shared'),
       },
       // Dedupe React + clerk-react so the wizard's ClerkProvider and
       // any hook that reads Clerk context share a single React tree

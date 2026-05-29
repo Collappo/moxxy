@@ -32,7 +32,7 @@ import {
 import type {
   ConnectionPhase,
   ConnectionSnapshot,
-} from '../shared/ipc';
+} from '@moxxy/desktop-ipc-contract';
 import {
   augmentedPaths,
   resolveMoxxyCli,

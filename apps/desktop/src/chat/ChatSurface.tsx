@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import type { MoxxyEvent } from '@moxxy/sdk';
 import { useChat } from '@/lib/useChat';
 import { useDesks } from '@/lib/useDesks';
-import type { ConnectionPhase } from '@shared/ipc';
+import type { ConnectionPhase } from '@moxxy/desktop-ipc-contract';
 import { Transcript } from './Transcript';
 import { Composer } from './Composer';
 import { Icon } from '@/lib/Icon';

@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import type { ConnectionPhase, NodeProbe, OnboardingStatus } from '@shared/ipc';
+import type { ConnectionPhase, NodeProbe, OnboardingStatus } from '@moxxy/desktop-ipc-contract';
 import { useOnboarding } from '@/lib/useOnboarding';
 
 interface OnboardingWizardProps {

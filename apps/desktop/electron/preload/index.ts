@@ -11,7 +11,7 @@ import type {
   IpcCommandName,
   IpcEvents,
   MoxxyApi,
-} from '../shared/ipc';
+} from '@moxxy/desktop-ipc-contract';
 
 const api: MoxxyApi = {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

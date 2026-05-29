@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from './api';
 import { connectionStore } from './useConnection';
-import type { Desk, DesksOverview } from '@shared/ipc';
+import type { Desk, DesksOverview } from '@moxxy/desktop-ipc-contract';
 
 export interface UseDesks {
   readonly desks: ReadonlyArray<Desk>;

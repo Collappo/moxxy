@@ -7,10 +7,7 @@
     "types": ["node"],
     "noEmit": true,
     "verbatimModuleSyntax": true,
-    "allowImportingTsExtensions": true,
-    "paths": {
-      "@shared/*": ["./electron/shared/*"]
-    }
+    "allowImportingTsExtensions": true
   },
   "include": ["electron/**/*", "electron.vite.config.ts"],
   "exclude": ["dist", "dist-electron", "node_modules", "release"]

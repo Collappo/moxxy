@@ -1,4 +1,4 @@
-import type { ConnectionPhase } from '@shared/ipc';
+import type { ConnectionPhase } from '@moxxy/desktop-ipc-contract';
 
 interface StatusLineProps {
   readonly phase: ConnectionPhase;

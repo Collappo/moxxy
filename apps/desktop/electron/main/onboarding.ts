@@ -11,7 +11,7 @@ import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
 
-import type { OnboardingStatus } from '../shared/ipc';
+import type { OnboardingStatus } from '@moxxy/desktop-ipc-contract';
 import {
   augmentedPaths,
   resolveMoxxyCli,

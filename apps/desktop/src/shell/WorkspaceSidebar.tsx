@@ -7,7 +7,7 @@ import { Modal, ConfirmModal } from '@/lib/Modal';
 import { useUnreadWorkspaces } from '@/lib/useChat';
 import { usePrefs } from '@/lib/usePrefs';
 import { ProfileView } from './ProfileView';
-import type { Desk } from '@shared/ipc';
+import type { Desk } from '@moxxy/desktop-ipc-contract';
 
 /** Format an accountType value for display. Free-tier is the default
  *  when the publicMetadata field is missing. */

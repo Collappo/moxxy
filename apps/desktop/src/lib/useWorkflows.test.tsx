@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { __setApiOverride } from './api';
 import { useWorkflows } from './useWorkflows';
-import type { MoxxyApi, WorkflowRun, WorkflowSummary } from '@shared/ipc';
+import type { MoxxyApi, WorkflowRun, WorkflowSummary } from '@moxxy/desktop-ipc-contract';
 
 function fakeApi(invoke: MoxxyApi['invoke']): MoxxyApi {
   return { invoke, subscribe: () => () => {} };

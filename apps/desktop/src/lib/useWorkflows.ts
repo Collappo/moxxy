@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from './api';
-import type { WorkflowRun, WorkflowSummary } from '@shared/ipc';
+import type { WorkflowRun, WorkflowSummary } from '@moxxy/desktop-ipc-contract';
 
 export interface UseWorkflows {
   readonly list: ReadonlyArray<WorkflowSummary>;

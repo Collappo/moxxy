@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 import { api } from './api';
-import type { ConnectionPhase, ConnectionSnapshot } from '@shared/ipc';
+import type { ConnectionPhase, ConnectionSnapshot } from '@moxxy/desktop-ipc-contract';
 
 /**
  * Module-level store of every supervised workspace's connection

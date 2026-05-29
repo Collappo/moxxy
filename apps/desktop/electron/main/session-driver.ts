@@ -18,7 +18,7 @@ import type { BrowserWindow } from 'electron';
 import type { MoxxyEvent } from '@moxxy/sdk';
 import type { RemoteSession } from '@moxxy/runner';
 
-import type { IpcEvents } from '../shared/ipc';
+import type { IpcEvents } from '@moxxy/desktop-ipc-contract';
 
 interface ActiveTurn {
   controller: AbortController;

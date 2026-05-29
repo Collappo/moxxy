@@ -4,7 +4,7 @@ import type {
   ConnectionPhase,
   NodeProbe,
   OnboardingStatus,
-} from '@shared/ipc';
+} from '@moxxy/desktop-ipc-contract';
 
 /**
  * Reactive onboarding state. Re-probes whenever the connection

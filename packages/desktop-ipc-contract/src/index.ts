@@ -10,7 +10,13 @@
  * across three places.
  */
 
-import type { MoxxyEvent } from '@moxxy/sdk';
+import type { MoxxyEvent, SessionInfo } from '@moxxy/sdk';
+
+export type { SessionInfo };
+// `validateIpcInput` / `ipcInputSchemas` are exposed via the
+// `@moxxy/desktop-ipc-contract/validation` subpath (not re-exported here)
+// so the contract types stay a leaf — validation depends on the types,
+// not the other way around.
 
 // ---------- Connection lifecycle -------------------------------------------
 
@@ -251,7 +257,7 @@ export interface IpcCommands {
 
   /** Returns the runner's SessionInfo snapshot for the workspace.
    *  Defaults to the active workspace. */
-  'session.info': (args?: { workspaceId?: string }) => Promise<unknown | null>;
+  'session.info': (args?: { workspaceId?: string }) => Promise<SessionInfo | null>;
   /** Issue a new turn. Defaults to the active workspace; pass a
    *  workspaceId to start a turn in a background workspace. Events
    *  stream back via 'runner.event' tagged with the same id. */
@@ -314,6 +320,32 @@ export interface IpcCommands {
       readonly kind: 'file' | 'dir';
     }>;
   }>;
+
+  // ---- Chat transcript log (main-process append-only NDJSON) ------------
+  /** Append committed runner events to the workspace's durable log.
+   *  Append-only: never re-serialises old events. */
+  'chat.append': (args: {
+    workspaceId: string;
+    events: ReadonlyArray<MoxxyEvent>;
+  }) => Promise<void>;
+  /** Load a page of events ending at `before` (a line-index cursor; null
+   *  = the tail). Returns the page oldest-first plus `prevCursor` to
+   *  request the next-older page (null when the start is reached). */
+  'chat.loadSegment': (args: {
+    workspaceId: string;
+    before: number | null;
+    limit: number;
+  }) => Promise<{ events: ReadonlyArray<MoxxyEvent>; prevCursor: number | null }>;
+  /** Truncate a workspace's log (Clear conversation). */
+  'chat.clearLog': (args: { workspaceId: string }) => Promise<void>;
+  /** Workspace ids that have a persisted log on disk. */
+  'chat.listWorkspaces': () => Promise<ReadonlyArray<string>>;
+  /** One-time migration: the renderer hands up the events it parsed from
+   *  the legacy localStorage blobs; the main process seeds the NDJSON
+   *  logs. Idempotent — skips workspaces whose log already exists. */
+  'chat.migrate': (args: {
+    workspaces: ReadonlyArray<{ workspaceId: string; events: ReadonlyArray<MoxxyEvent> }>;
+  }) => Promise<void>;
 
   // Workflows
   'workflows.list': () => Promise<ReadonlyArray<WorkflowSummary>>;

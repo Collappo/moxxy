@@ -1,4 +1,4 @@
-import type { ConnectionSnapshot } from '@shared/ipc';
+import type { ConnectionSnapshot } from '@moxxy/desktop-ipc-contract';
 
 interface ConnectionScreenProps {
   readonly snapshot: ConnectionSnapshot | null;

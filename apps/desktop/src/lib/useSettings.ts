@@ -5,7 +5,7 @@ import type {
   ProviderEntry,
   SkillFile,
   VaultEntryName,
-} from '@shared/ipc';
+} from '@moxxy/desktop-ipc-contract';
 
 export interface UseSettings {
   readonly providers: ReadonlyArray<ProviderEntry>;

@@ -153,7 +153,7 @@ export function App(): JSX.Element {
 }
 
 function describePhase(
-  phase: import('@shared/ipc').ConnectionPhase | undefined,
+  phase: import('@moxxy/desktop-ipc-contract').ConnectionPhase | undefined,
 ): string {
   if (!phase) return 'Reconnecting…';
   switch (phase.phase) {
