@@ -3,26 +3,21 @@
  *
  * Stages:
  *
- *   inactive    44×44   logo only.
- *                       Top 8 px = visible drag handle (only drag zone).
- *                       The rest = click target → ACTIVE.
+ *   inactive    44×44   logo only. Click → ACTIVE.
  *
- *   active     220×56   logo + voice + text + restore-main + close.
- *                       Left 10 px = visible drag-grip column.
- *                       Buttons + logo are no-drag, clickable.
+ *   active     232×56   logo + voice + text + restore-main + close.
+ *                       Mic button starts an in-place recording
+ *                       overlay (spectrum visualiser fills the panel
+ *                       background) instead of opening a separate
+ *                       window. Press Space anywhere on the widget
+ *                       to start / stop recording.
  *
  *   mini-text  360×220  compact composer (input + send).
- *                       Header bar = drag region.
- *
- *   mini-voice 360×220  push-to-talk + transcript.
- *                       Header bar = drag region.
  *
  * Resize is handled by the main process. Manual resize via window
  * edges is disabled in focus-window.ts; setBounds still works.
  *
- * Every stage is flat, sharp-cornered, shadowless — per user spec.
- * Drag is constrained to explicit handles; clicking buttons never
- * triggers window drag.
+ * Every stage is flat, sharp-cornered, shadowless.
  */
 
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
@@ -31,13 +26,12 @@ import { ChatStoreBridge, useChat } from '@/lib/useChat';
 import { chatStore } from '@/lib/chatStore';
 import { ConnectionBridge, useActiveWorkspaceId } from '@/lib/useConnection';
 
-type Stage = 'inactive' | 'active' | 'mini-text' | 'mini-voice';
+type Stage = 'inactive' | 'active' | 'mini-text';
 
 const SIZE: Record<Stage, { width: number; height: number }> = {
   inactive: { width: 44, height: 44 },
   active: { width: 232, height: 56 },
   'mini-text': { width: 360, height: 220 },
-  'mini-voice': { width: 360, height: 220 },
 };
 
 const ASSET_LOGO = './logo.png';
@@ -72,20 +66,12 @@ function Surface({
   if (stage === 'active')
     return (
       <Active
+        workspaceId={workspaceId}
         onCollapse={() => setStage('inactive')}
         onText={() => setStage('mini-text')}
-        onVoice={() => setStage('mini-voice')}
       />
     );
-  if (stage === 'mini-text')
-    return <MiniText workspaceId={workspaceId} onBack={() => setStage('active')} />;
-  return (
-    <MiniVoice
-      workspaceId={workspaceId}
-      onBack={() => setStage('active')}
-      onSent={() => setStage('mini-text')}
-    />
-  );
+  return <MiniText workspaceId={workspaceId} onBack={() => setStage('active')} />;
 }
 
 // ---- Stage 1: inactive ---------------------------------------------------
@@ -110,20 +96,134 @@ function Inactive({ onActivate }: { readonly onActivate: () => void }): JSX.Elem
 
 // ---- Stage 2: active -----------------------------------------------------
 
+type RecPhase = 'idle' | 'recording' | 'transcribing' | 'error';
+
 function Active({
+  workspaceId,
   onCollapse,
   onText,
-  onVoice,
 }: {
+  readonly workspaceId: string | null;
   readonly onCollapse: () => void;
   readonly onText: () => void;
-  readonly onVoice: () => void;
 }): JSX.Element {
-  // The whole panel background is the drag region; every button
-  // sits on top with no-drag + higher z-index so clicks reach
-  // React. Drag from any empty space.
+  const chat = useChat(workspaceId);
+  const [phase, setPhase] = useState<RecPhase>('idle');
+  const [analyser, setAnalyser] = useState<AnalyserNode | null>(null);
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+
+  const stop = (): void => {
+    const rec = recorderRef.current;
+    if (rec?.state === 'recording') rec.stop();
+    recorderRef.current = null;
+  };
+
+  const finalize = async (
+    chunks: ReadonlyArray<Blob>,
+    mimeType: string,
+  ): Promise<void> => {
+    setPhase('transcribing');
+    try {
+      const blob = new Blob([...chunks], { type: mimeType });
+      const buf = await blob.arrayBuffer();
+      const text = await api().invoke('session.transcribe', {
+        audioBase64: arrayBufferToBase64(buf),
+        mimeType,
+      });
+      if (text?.trim() && workspaceId) {
+        // Send straight as a turn — the visualiser snaps back to
+        // idle and the focus widget's StatusLine + main window pick
+        // up the user_prompt event.
+        void chat.send(text.trim());
+      }
+      setPhase('idle');
+    } catch {
+      setPhase('error');
+      window.setTimeout(() => setPhase('idle'), 1800);
+    }
+  };
+
+  const start = async (): Promise<void> => {
+    if (phase !== 'idle') return;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const candidates = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4'];
+      const mimeType = candidates.find((m) => MediaRecorder.isTypeSupported(m));
+      const rec = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+      const chunks: Blob[] = [];
+      rec.addEventListener('dataavailable', (ev) => {
+        if (ev.data.size > 0) chunks.push(ev.data);
+      });
+      rec.addEventListener('stop', () => {
+        stream.getTracks().forEach((t) => t.stop());
+        audioContextRef.current?.close().catch(() => undefined);
+        audioContextRef.current = null;
+        setAnalyser(null);
+        void finalize(chunks, rec.mimeType);
+      });
+      rec.start();
+      recorderRef.current = rec;
+      setPhase('recording');
+
+      // Wire AnalyserNode for the inline spectrum.
+      const Ctor = window as unknown as {
+        AudioContext?: typeof AudioContext;
+        webkitAudioContext?: typeof AudioContext;
+      };
+      const Audio = Ctor.AudioContext ?? Ctor.webkitAudioContext;
+      if (Audio) {
+        const ctx = new Audio();
+        audioContextRef.current = ctx;
+        const source = ctx.createMediaStreamSource(stream);
+        const an = ctx.createAnalyser();
+        an.fftSize = 256;
+        an.smoothingTimeConstant = 0.7;
+        source.connect(an);
+        setAnalyser(an);
+      }
+    } catch {
+      setPhase('error');
+      window.setTimeout(() => setPhase('idle'), 1800);
+    }
+  };
+
+  const toggleMic = (): void => {
+    if (phase === 'recording') stop();
+    else void start();
+  };
+
+  // Space toggles mic when the widget has focus. We listen at the
+  // window level (the focus widget's renderer) so the shortcut works
+  // even when the user hasn't clicked a button yet.
+  useEffect(() => {
+    const onKey = (ev: KeyboardEvent): void => {
+      if (ev.code !== 'Space') return;
+      // Don't fight an input that captures the spacebar.
+      const target = ev.target as HTMLElement | null;
+      if (target && /INPUT|TEXTAREA/.test(target.tagName)) return;
+      ev.preventDefault();
+      toggleMic();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase, workspaceId]);
+
+  // Clean up the mic on unmount.
+  useEffect(() => {
+    return () => {
+      const rec = recorderRef.current;
+      if (rec?.state === 'recording') rec.stop();
+      recorderRef.current = null;
+      audioContextRef.current?.close().catch(() => undefined);
+    };
+  }, []);
+
+  const recording = phase === 'recording';
   return (
     <div style={style.activeRoot}>
+      {analyser && recording && <SpectroBackground analyser={analyser} />}
       <button
         type="button"
         onClick={onCollapse}
@@ -134,8 +234,12 @@ function Active({
       </button>
       <div style={style.activeDivider} aria-hidden />
       <div style={style.activeActions}>
-        <ActionButton onClick={onVoice} aria-label="Voice">
-          <MicIcon />
+        <ActionButton
+          onClick={toggleMic}
+          aria-label={recording ? 'Stop recording (Space)' : 'Record voice (Space)'}
+          variant={recording ? 'voiceOn' : undefined}
+        >
+          {phase === 'transcribing' ? <Dot delay={0} /> : <MicIcon />}
         </ActionButton>
         <ActionButton onClick={onText} aria-label="Text">
           <PencilIcon />
@@ -154,7 +258,34 @@ function Active({
           <XIcon />
         </ActionButton>
       </div>
+      {/* Subtle Space hint pinned to the right of the mic — only
+       *  shows when idle so it doesn't compete with the spectrum. */}
+      {phase === 'idle' && <KeyHint label="Space" />}
     </div>
+  );
+}
+
+function KeyHint({ label }: { readonly label: string }): JSX.Element {
+  return (
+    <span
+      aria-hidden
+      style={{
+        position: 'absolute',
+        bottom: 3,
+        right: 8,
+        fontFamily: 'ui-monospace, SF Mono, Menlo, monospace',
+        fontSize: 9,
+        color: 'rgba(15, 23, 42, 0.45)',
+        padding: '1px 5px',
+        borderRadius: 3,
+        background: 'rgba(15, 23, 42, 0.05)',
+        letterSpacing: '0.02em',
+        pointerEvents: 'none',
+        zIndex: 2,
+      }}
+    >
+      {label}
+    </span>
   );
 }
 
@@ -219,172 +350,7 @@ function MiniText({
   );
 }
 
-// ---- Stage 3b: mini-voice ------------------------------------------------
-
-type VoicePhase = 'idle' | 'recording' | 'transcribing' | 'unavailable';
-
-function MiniVoice({
-  workspaceId,
-  onBack,
-  onSent,
-}: {
-  readonly workspaceId: string | null;
-  readonly onBack: () => void;
-  readonly onSent: () => void;
-}): JSX.Element {
-  const [phase, setPhase] = useState<VoicePhase>('idle');
-  const [transcript, setTranscript] = useState('');
-  const [analyser, setAnalyser] = useState<AnalyserNode | null>(null);
-  const recorderRef = useRef<MediaRecorder | null>(null);
-  const audioContextRef = useRef<AudioContext | null>(null);
-  const startedRef = useRef(false);
-
-  const start = async (): Promise<void> => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const candidates = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4'];
-      const mimeType = candidates.find((m) => MediaRecorder.isTypeSupported(m));
-      const rec = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
-      const chunks: Blob[] = [];
-      rec.addEventListener('dataavailable', (ev) => {
-        if (ev.data.size > 0) chunks.push(ev.data);
-      });
-      rec.addEventListener('stop', () => {
-        stream.getTracks().forEach((t) => t.stop());
-        audioContextRef.current?.close().catch(() => undefined);
-        audioContextRef.current = null;
-        setAnalyser(null);
-        void finalize(chunks, rec.mimeType);
-      });
-      rec.start();
-      recorderRef.current = rec;
-      setPhase('recording');
-
-      // Wire up an AnalyserNode for the spectroscope. Same stream as
-      // the MediaRecorder; just a parallel tap.
-      const Ctor = (window as unknown as {
-        AudioContext?: typeof AudioContext;
-        webkitAudioContext?: typeof AudioContext;
-      });
-      const Audio = Ctor.AudioContext ?? Ctor.webkitAudioContext;
-      if (Audio) {
-        const ctx = new Audio();
-        audioContextRef.current = ctx;
-        const source = ctx.createMediaStreamSource(stream);
-        const an = ctx.createAnalyser();
-        an.fftSize = 256;
-        an.smoothingTimeConstant = 0.7;
-        source.connect(an);
-        setAnalyser(an);
-      }
-    } catch {
-      setPhase('unavailable');
-      window.setTimeout(() => setPhase('idle'), 1500);
-    }
-  };
-
-  const stop = (): void => {
-    const rec = recorderRef.current;
-    if (rec?.state === 'recording') rec.stop();
-    recorderRef.current = null;
-  };
-
-  const finalize = async (chunks: ReadonlyArray<Blob>, mimeType: string): Promise<void> => {
-    setPhase('transcribing');
-    try {
-      const blob = new Blob([...chunks], { type: mimeType });
-      const buf = await blob.arrayBuffer();
-      const text = await api().invoke('session.transcribe', {
-        audioBase64: arrayBufferToBase64(buf),
-        mimeType,
-      });
-      if (text?.trim()) setTranscript(text.trim());
-      setPhase('idle');
-    } catch {
-      setPhase('unavailable');
-      window.setTimeout(() => setPhase('idle'), 1500);
-    }
-  };
-
-  const sendTranscript = (): void => {
-    if (!workspaceId || !transcript.trim()) return;
-    void api()
-      .invoke('session.runTurn', { workspaceId, prompt: transcript.trim() })
-      .catch(() => undefined);
-    setTranscript('');
-    onSent();
-  };
-
-  // Auto-start recording on mount. The user clicked the mic icon in
-  // the active row — they expect recording to begin immediately.
-  // StrictMode is OFF in the focus window so this fires exactly once.
-  useEffect(() => {
-    if (startedRef.current) return;
-    startedRef.current = true;
-    void start();
-    return () => {
-      // Stop the mic when the user navigates away from the voice
-      // mini panel.
-      const rec = recorderRef.current;
-      if (rec?.state === 'recording') {
-        rec.stop();
-        recorderRef.current = null;
-      }
-      audioContextRef.current?.close().catch(() => undefined);
-      audioContextRef.current = null;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  return (
-    <div style={style.panel}>
-      <MiniHeader title="Voice" onBack={onBack} />
-      <div style={style.voiceBody}>
-        {/* Ambient background: blurred frequency blobs that pulse
-         *  with the audio. Sits behind every interactive control
-         *  via z-index. */}
-        {analyser && phase === 'recording' && (
-          <SpectroBackground analyser={analyser} />
-        )}
-        <div style={style.voiceContent}>
-          <button
-            type="button"
-            onClick={() => (phase === 'recording' ? stop() : void start())}
-            disabled={phase === 'transcribing' || phase === 'unavailable'}
-            style={{
-              ...style.micButton,
-              ...(phase === 'recording' ? style.micButtonRecording : null),
-              ...(phase === 'transcribing' || phase === 'unavailable'
-                ? style.micButtonDisabled
-                : null),
-            }}
-            aria-label={phase === 'recording' ? 'Tap to stop' : 'Tap to record'}
-          >
-            <MicIcon big />
-          </button>
-          {transcript ? (
-            <div style={style.transcript}>{transcript}</div>
-          ) : (
-            <div style={style.hint}>
-              {phase === 'recording'
-                ? 'Listening — tap mic to stop.'
-                : phase === 'transcribing'
-                  ? 'Transcribing…'
-                  : phase === 'unavailable'
-                    ? 'No mic / transcriber.'
-                    : 'Tap to record.'}
-            </div>
-          )}
-          {transcript && phase === 'idle' && (
-            <button type="button" onClick={sendTranscript} style={style.transcriptSend}>
-              Send
-            </button>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
+// ---- (mini-voice removed — voice now lives inline in the active stage) ---
 
 // ---- SpectroBackground ---------------------------------------------------
 // Bar visualiser styled to match the user reference: many thin
@@ -586,24 +552,36 @@ function ActionButton({
 }: {
   readonly onClick: () => void;
   readonly children: React.ReactNode;
-  readonly variant?: 'danger';
+  readonly variant?: 'danger' | 'voiceOn';
   readonly 'aria-label': string;
 }): JSX.Element {
   const [hover, setHover] = useState(false);
+  const base = { ...style.actionBtn };
+  let pinned: React.CSSProperties | null = null;
+  if (variant === 'voiceOn') {
+    // Recording-on look — pink moxxy gradient + soft halo so the
+    // mic button stays readable over the spectrum background.
+    pinned = {
+      background: 'linear-gradient(135deg, #ec4899, #a855f7)',
+      color: '#fff',
+      boxShadow:
+        '0 0 0 2px rgba(255, 255, 255, 0.85), 0 6px 14px -6px rgba(236, 72, 153, 0.55)',
+    };
+  }
+  let hoverStyle: React.CSSProperties | null = null;
+  if (hover && !pinned) {
+    hoverStyle =
+      variant === 'danger'
+        ? { background: 'rgba(239, 68, 68, 0.12)', color: '#ef4444' }
+        : { background: 'rgba(15, 23, 42, 0.06)', color: '#0f172a' };
+  }
   return (
     <button
       type="button"
       onClick={onClick}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
-      style={{
-        ...style.actionBtn,
-        ...(hover
-          ? variant === 'danger'
-            ? { background: 'rgba(239, 68, 68, 0.12)', color: '#ef4444' }
-            : { background: 'rgba(15, 23, 42, 0.06)', color: '#0f172a' }
-          : null),
-      }}
+      style={{ ...base, ...(pinned ?? {}), ...(hoverStyle ?? {}) }}
       aria-label={rest['aria-label']}
     >
       {children}
@@ -857,6 +835,8 @@ const style: Record<string, React.CSSProperties> = {
     display: 'flex',
     alignItems: 'center',
     padding: '0 8px',
+    position: 'relative',
+    overflow: 'hidden',
     // Whole panel is the drag region; the brand button + action
     // row both opt out with no-drag + position:relative so they
     // sit on top of the drag layer.

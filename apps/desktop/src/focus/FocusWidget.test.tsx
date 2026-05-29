@@ -100,14 +100,11 @@ describe('FocusWidget stages', () => {
     const spy = installFakeApi();
     render(<FocusWidget />);
     fireEvent.click(screen.getByRole('button', { name: /click to expand/i }));
-    expect(screen.getByRole('button', { name: /^voice$/i })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /record voice.*space/i })).toBeTruthy();
     expect(screen.getByRole('button', { name: /^text$/i })).toBeTruthy();
     expect(screen.getByRole('button', { name: /open main window/i })).toBeTruthy();
     expect(screen.getByRole('button', { name: /close focus mode/i })).toBeTruthy();
     await waitFor(() => {
-      // We don't assert the exact pixel size (we tune those over
-      // time) — just that the IPC fired with reasonable dimensions
-      // for the active state.
       const resize = spy.invokes.find(
         (i) =>
           i.channel === 'focus.resize' &&
@@ -127,21 +124,24 @@ describe('FocusWidget stages', () => {
     expect(screen.getByRole('button', { name: /^send$/i })).toBeTruthy();
   });
 
-  it('active → mini-voice shows the push-to-talk button', () => {
+  it('active stage exposes a voice button with Space shortcut hint', () => {
     installFakeApi();
     render(<FocusWidget />);
     fireEvent.click(screen.getByRole('button', { name: /click to expand/i }));
-    fireEvent.click(screen.getByRole('button', { name: /^voice$/i }));
-    expect(screen.getByRole('button', { name: /tap to record/i })).toBeTruthy();
+    // Voice happens inline in the active panel — clicking the mic
+    // toggles recording, no separate stage. The aria-label includes
+    // 'Space' so the keyboard shortcut is discoverable.
+    expect(screen.getByRole('button', { name: /record voice.*space/i })).toBeTruthy();
   });
 
-  it('mini → back returns to the active stage', () => {
+  it('mini-text → back returns to the active stage', () => {
     installFakeApi();
     render(<FocusWidget />);
     fireEvent.click(screen.getByRole('button', { name: /click to expand/i }));
     fireEvent.click(screen.getByRole('button', { name: /^text$/i }));
     fireEvent.click(screen.getByRole('button', { name: /^back$/i }));
-    expect(screen.getByRole('button', { name: /^voice$/i })).toBeTruthy();
+    // Voice mic button is back (in the active row), text composer is gone.
+    expect(screen.getByRole('button', { name: /record voice.*space/i })).toBeTruthy();
     expect(screen.queryByPlaceholderText(/ask moxxy/i)).toBeNull();
   });
 
