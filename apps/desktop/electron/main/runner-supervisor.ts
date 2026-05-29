@@ -1,0 +1,301 @@
+/**
+ * Owns the lifecycle of the connection to a moxxy runner.
+ *
+ *   1. Resolve the moxxy CLI. If absent → `cli-missing` phase with a
+ *      clear hint; never silently waits forever.
+ *   2. Probe the canonical runner socket. If a `moxxy serve` is
+ *      already alive (e.g. user has `moxxy tui` open), adopt it.
+ *      Otherwise spawn one ourselves and supervise it.
+ *   3. Connect a {@link RemoteSession} client via `@moxxy/runner`
+ *      and surface it. No custom JSON-RPC plumbing — the moxxy
+ *      runner package owns the wire format.
+ *   4. Self-heal: if the connection drops or the spawned child dies,
+ *      we transition to `reconnecting` and loop back to resolution.
+ *
+ * Every state transition emits a `change` event so the IPC layer can
+ * forward it to the renderer without polling. A `snapshot()` accessor
+ * still exists for late mounts.
+ */
+
+import { spawn, type ChildProcess } from 'node:child_process';
+import { existsSync, unlinkSync } from 'node:fs';
+import { homedir } from 'node:os';
+import path from 'node:path';
+import { EventEmitter } from 'node:events';
+import { Socket } from 'node:net';
+
+import {
+  connectRemoteSession,
+  type RemoteSession,
+} from '@moxxy/runner';
+
+import type {
+  ConnectionPhase,
+  ConnectionSnapshot,
+} from '../shared/ipc';
+import {
+  augmentedPaths,
+  resolveMoxxyCli,
+  type CliInvocation,
+} from './cli-resolver';
+
+const PROBE_TIMEOUT_MS = 250;
+const SOCKET_WAIT_MS = 20_000;
+const SOCKET_POLL_MS = 200;
+const RECONNECT_BACKOFF_MS = 2_000;
+const LOG_RING_SIZE = 200;
+
+export class RunnerSupervisor extends EventEmitter {
+  private currentPhase: ConnectionPhase = { phase: 'idle' };
+  private cliPath: string | null = null;
+  private attempts = 0;
+  private logRing: Array<{ stream: 'stdout' | 'stderr'; line: string }> = [];
+  private session: RemoteSession | null = null;
+  private child: ChildProcess | null = null;
+  private retryNotify: () => void = () => {};
+  private stopped = false;
+
+  constructor(
+    private readonly socketPath: string = process.env.MOXXY_RUNNER_SOCKET ??
+      path.join(homedir(), '.moxxy', 'serve.sock'),
+  ) {
+    super();
+  }
+
+  snapshot(): ConnectionSnapshot {
+    return {
+      phase: this.currentPhase,
+      cliPath: this.cliPath,
+      attempts: this.attempts,
+      log: this.logRing.slice(),
+    };
+  }
+
+  /** The connected `RemoteSession`, or null. Used by IPC handlers to
+   *  forward turns / setProvider / setMode calls. */
+  remote(): RemoteSession | null {
+    return this.session;
+  }
+
+  /** Kick the loop out of a backoff wait so the user's Retry button
+   *  is responsive. No-op when already trying. */
+  forceRetry(): void {
+    this.retryNotify();
+  }
+
+  /** Run the supervision loop. Returns immediately; the loop runs
+   *  in the background for the lifetime of the process. */
+  async run(): Promise<void> {
+    while (!this.stopped) {
+      try {
+        await this.attempt();
+      } catch (err) {
+        // attempt() sets the phase itself for known failures. This
+        // catch is the safety net for unexpected throws.
+        if (this.currentPhase.phase !== 'failed' && this.currentPhase.phase !== 'cli-missing') {
+          const msg = err instanceof Error ? err.message : String(err);
+          this.attempts += 1;
+          this.setPhase({
+            phase: 'reconnecting',
+            reason: msg,
+            attempt: this.attempts,
+          });
+        }
+      }
+      await this.waitForRetry();
+    }
+  }
+
+  async stop(): Promise<void> {
+    this.stopped = true;
+    this.retryNotify();
+    if (this.session) {
+      try {
+        await this.session.close();
+      } catch {
+        /* ignore */
+      }
+      this.session = null;
+    }
+    if (this.child) {
+      this.child.kill();
+      this.child = null;
+    }
+  }
+
+  // ------- internals -------
+
+  private async attempt(): Promise<void> {
+    this.setPhase({ phase: 'resolving-cli' });
+    const cli = resolveMoxxyCli({ extraPaths: augmentedPaths() });
+    if (!cli) {
+      this.cliPath = null;
+      this.setPhase({
+        phase: 'cli-missing',
+        hint:
+          'moxxy CLI not found on PATH. Run `npm install -g @moxxy/cli` or set MOXXY_CLI_ENTRY.',
+      });
+      throw new Error('cli missing');
+    }
+    this.cliPath = displayPath(cli);
+
+    const adopt = await this.probeSocket();
+
+    if (!adopt) {
+      this.cleanupStaleSocket();
+      const child = this.spawnServe(cli);
+      this.child = child;
+      const pid = child.pid;
+      this.setPhase({
+        phase: 'spawning',
+        cliPath: this.cliPath,
+        socket: this.socketPath,
+        ...(typeof pid === 'number' ? { pid } : {}),
+      });
+      child.on('exit', (code, signal) => {
+        this.pushLog('stderr', `child exited code=${code} signal=${signal}`);
+      });
+    } else {
+      this.setPhase({
+        phase: 'adopting',
+        socket: this.socketPath,
+      });
+    }
+
+    await this.waitForSocket();
+
+    this.setPhase({
+      phase: 'attaching',
+      socket: this.socketPath,
+    });
+    const session = await connectRemoteSession({
+      role: 'desktop',
+      socketPath: this.socketPath,
+    });
+    this.session = session;
+
+    const info = session.getInfo();
+    this.setPhase({
+      phase: 'connected',
+      socket: this.socketPath,
+      sessionId: String(info.sessionId ?? '(unknown)'),
+      activeProvider: info.activeProvider ?? null,
+      activeMode: info.activeMode ?? null,
+    });
+
+    // Block here until the session drops. `onClose` fires exactly once
+    // (per RemoteSession's docs) when the runner link tears down.
+    await new Promise<void>((resolve) => {
+      session.onClose(() => resolve());
+    });
+
+    this.attempts += 1;
+    this.setPhase({
+      phase: 'reconnecting',
+      reason: 'runner disconnected',
+      attempt: this.attempts,
+    });
+    this.session = null;
+    if (this.child) {
+      this.child.kill();
+      this.child = null;
+    }
+  }
+
+  private probeSocket(): Promise<boolean> {
+    return new Promise<boolean>((resolve) => {
+      const socket = new Socket();
+      const done = (alive: boolean): void => {
+        socket.destroy();
+        resolve(alive);
+      };
+      socket.setTimeout(PROBE_TIMEOUT_MS);
+      socket.once('connect', () => done(true));
+      socket.once('error', () => done(false));
+      socket.once('timeout', () => done(false));
+      socket.connect(this.socketPath);
+    });
+  }
+
+  private cleanupStaleSocket(): void {
+    if (existsSync(this.socketPath)) {
+      try {
+        unlinkSync(this.socketPath);
+        this.pushLog('stderr', `removed stale socket ${this.socketPath}`);
+      } catch (e) {
+        this.pushLog(
+          'stderr',
+          `could not remove stale socket: ${(e as Error).message}`,
+        );
+      }
+    }
+  }
+
+  private spawnServe(cli: CliInvocation): ChildProcess {
+    const env = {
+      ...process.env,
+      MOXXY_RUNNER_SOCKET: this.socketPath,
+    };
+    const proc =
+      cli.kind === 'direct'
+        ? spawn(cli.bin, ['serve'], { env, stdio: ['ignore', 'pipe', 'pipe'] })
+        : spawn('node', [cli.entry, 'serve'], {
+            env,
+            stdio: ['ignore', 'pipe', 'pipe'],
+          });
+
+    proc.stdout?.on('data', (chunk) => this.consumeLog('stdout', chunk));
+    proc.stderr?.on('data', (chunk) => this.consumeLog('stderr', chunk));
+    return proc;
+  }
+
+  private async waitForSocket(): Promise<void> {
+    const deadline = Date.now() + SOCKET_WAIT_MS;
+    while (Date.now() < deadline) {
+      if (await this.probeSocket()) return;
+      await sleep(SOCKET_POLL_MS);
+    }
+    throw new Error(
+      `moxxy serve did not bind ${this.socketPath} within ${SOCKET_WAIT_MS} ms`,
+    );
+  }
+
+  private async waitForRetry(): Promise<void> {
+    if (this.stopped) return;
+    await new Promise<void>((resolve) => {
+      const t = setTimeout(resolve, RECONNECT_BACKOFF_MS);
+      this.retryNotify = () => {
+        clearTimeout(t);
+        resolve();
+      };
+    });
+    this.retryNotify = () => {};
+  }
+
+  private setPhase(phase: ConnectionPhase): void {
+    this.currentPhase = phase;
+    this.emit('change', this.snapshot());
+  }
+
+  private consumeLog(stream: 'stdout' | 'stderr', chunk: Buffer): void {
+    const lines = chunk.toString().split(/\r?\n/);
+    for (const line of lines) {
+      if (line) this.pushLog(stream, line);
+    }
+  }
+
+  private pushLog(stream: 'stdout' | 'stderr', line: string): void {
+    this.logRing.push({ stream, line });
+    if (this.logRing.length > LOG_RING_SIZE) {
+      this.logRing.splice(0, this.logRing.length - LOG_RING_SIZE);
+    }
+  }
+}
+
+function displayPath(cli: CliInvocation): string {
+  return cli.kind === 'direct' ? cli.bin : cli.entry;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}

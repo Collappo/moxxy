@@ -1,10 +1,6 @@
 node_modules
 dist
+dist-electron
+release
 .turbo
 .vite
-
-playwright-report
-test-results
-
-src-tauri/target
-src-tauri/Cargo.lock

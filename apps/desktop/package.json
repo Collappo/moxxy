@@ -2,36 +2,28 @@
   "name": "@moxxy/desktop",
   "private": true,
   "version": "0.0.1",
-  "description": "moxxy desktop app — Tauri shell that runs a `moxxy serve` sidecar and renders a React UI for desks, sessions, voice, settings, scheduler, multi-window, and tray.",
+  "description": "moxxy desktop — Electron app that connects to moxxy via @moxxy/runner and renders a TUI-equivalent chat surface.",
   "type": "module",
+  "main": "dist-electron/main/index.js",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc -p tsconfig.json && vite build",
-    "preview": "vite preview",
-    "tauri": "tauri",
-    "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "preview": "electron-vite preview",
+    "package": "electron-vite build && electron-builder",
+    "package:dir": "electron-vite build && electron-builder --dir",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.node.json --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage",
-    "test:e2e": "playwright test",
-    "test:rust": "cd src-tauri && cargo test -p moxxy-desktop-core",
-    "check:rust": "cd src-tauri && cargo check -p moxxy-desktop-core --all-targets",
-    "bundle-cli": "node scripts/bundle-cli.mjs",
-    "prebuild": "pnpm bundle-cli && pnpm build",
-    "clean": "rm -rf dist .turbo node_modules/.vite src-tauri/target src-tauri/resources"
+    "clean": "rm -rf dist dist-electron .turbo node_modules/.vite"
   },
   "dependencies": {
-    "@moxxy/ui-tokens": "workspace:*",
-    "@tauri-apps/api": "^2.0.0",
+    "@moxxy/runner": "workspace:*",
+    "@moxxy/sdk": "workspace:*",
     "react": "catalog:",
     "react-dom": "catalog:"
   },
   "devDependencies": {
     "@moxxy/tsconfig": "workspace:*",
-    "@playwright/test": "^1.49.0",
-    "@tauri-apps/cli": "^2.0.0",
     "@testing-library/jest-dom": "^6.6.0",
     "@testing-library/react": "^16.1.0",
     "@testing-library/user-event": "^14.5.2",
@@ -40,9 +32,34 @@
     "@types/react-dom": "catalog:",
     "@vitejs/plugin-react": "^4.3.4",
     "@vitest/coverage-v8": "^2.1.8",
+    "electron": "^33.2.1",
+    "electron-builder": "^25.1.8",
+    "electron-vite": "^2.3.0",
     "jsdom": "^25.0.1",
     "typescript": "catalog:",
     "vite": "^5.4.0",
     "vitest": "catalog:"
+  },
+  "build": {
+    "appId": "ai.moxxy.desktop",
+    "productName": "moxxy",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist-electron/**",
+      "dist/**"
+    ],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "target": "dmg"
+    },
+    "linux": {
+      "target": "AppImage",
+      "category": "Utility"
+    },
+    "win": {
+      "target": "nsis"
+    }
   }
 }

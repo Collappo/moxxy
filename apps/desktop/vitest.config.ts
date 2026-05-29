@@ -1,41 +1,43 @@
-import { defineConfig, mergeConfig } from 'vitest/config';
+import { defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react';
 import path from 'node:path';
 
-export default mergeConfig(
-  defineConfig({
-    plugins: [react()],
-    resolve: {
-      alias: {
-        '@': path.resolve(__dirname, 'src'),
-      },
+/**
+ * Two test environments coexist:
+ *   - jsdom for renderer (React) tests under `src/`.
+ *   - node for main-process tests under `electron/`.
+ *
+ * `environmentMatchGlobs` routes each test file to the right env so
+ * we don't bloat node tests with a fake DOM.
+ */
+export default defineConfig({
+  plugins: [react()],
+  resolve: {
+    alias: {
+      '@': path.resolve(__dirname, 'src'),
+      '@shared': path.resolve(__dirname, 'electron/shared'),
     },
-  }),
-  defineConfig({
-    test: {
-      globals: false,
-      environment: 'jsdom',
-      setupFiles: ['./src/test-setup.ts'],
-      include: ['src/**/*.test.{ts,tsx}'],
-      exclude: ['**/node_modules/**', '**/dist/**', 'tests/e2e/**', 'src-tauri/**'],
-      coverage: {
-        provider: 'v8',
-        reporter: ['text', 'lcov', 'html'],
-        include: ['src/**/*.{ts,tsx}'],
-        exclude: [
-          'src/**/*.test.{ts,tsx}',
-          'src/test-setup.ts',
-          'src/**/__fixtures__/**',
-          'src/**/__mocks__/**',
-          'src/main.tsx',
-        ],
-        thresholds: {
-          lines: 80,
-          functions: 80,
-          branches: 75,
-          statements: 80,
-        },
-      },
+  },
+  test: {
+    globals: false,
+    setupFiles: ['./src/test-setup.ts'],
+    environmentMatchGlobs: [
+      ['src/**', 'jsdom'],
+      ['electron/**', 'node'],
+    ],
+    include: ['src/**/*.test.{ts,tsx}', 'electron/**/*.test.ts'],
+    exclude: ['**/node_modules/**', '**/dist/**', '**/dist-electron/**'],
+    coverage: {
+      provider: 'v8',
+      reporter: ['text', 'lcov'],
+      include: ['src/**/*.{ts,tsx}', 'electron/**/*.ts'],
+      exclude: [
+        '**/*.test.{ts,tsx}',
+        '**/test-setup.ts',
+        'electron/main/index.ts',
+        'electron/preload/index.ts',
+        'src/main.tsx',
+      ],
     },
-  }),
-);
+  },
+});

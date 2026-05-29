@@ -1,10 +1,30 @@
-* {
-  box-sizing: border-box;
+/*
+ * Minimal global styles. Design tokens kept inline here for now —
+ * the standalone @moxxy/ui-tokens package was deleted in the reset
+ * and will be reintroduced once the surfaces stabilize.
+ */
+
+:root {
+  --color-bg: #08080c;
+  --color-bg-card: #111119;
+  --color-bg-card-hover: #16161f;
+  --color-border: #20202c;
+  --color-border-light: #32324a;
+  --color-text: #e8e8f2;
+  --color-text-muted: #9595ac;
+  --color-text-dim: #686d86;
+  --color-primary: #818cf8;
+  --color-accent: #22d3ee;
+  --color-green: #34d399;
+  --color-pink: #f472b6;
+  --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  --radius-block: 6px;
 }
 
-html,
-body,
-#root {
+* { box-sizing: border-box; }
+
+html, body, #root {
   margin: 0;
   padding: 0;
   height: 100%;
@@ -12,9 +32,8 @@ body,
   font-family: var(--font-sans);
   background: var(--color-bg);
   color: var(--color-text);
-  font-feature-settings: "cv11", "ss01";
-  letter-spacing: var(--tracking-tight);
-  line-height: var(--leading-body);
+  letter-spacing: -0.01em;
+  line-height: 1.6;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -27,48 +46,29 @@ button {
   cursor: pointer;
 }
 
-code,
-kbd,
-pre,
-.mono {
-  font-family: var(--font-mono);
-}
+code, kbd, pre, .mono { font-family: var(--font-mono); }
 
 .app-shell {
-  display: grid;
-  grid-template-columns: 260px 1fr;
+  display: flex;
+  flex-direction: column;
   height: 100vh;
-  width: 100vw;
 }
 
-.app-sidebar {
-  background: var(--color-bg-secondary);
-  border-right: 1px solid var(--color-border);
-  overflow-y: auto;
+.bp-grid {
+  background-image:
+    radial-gradient(circle at center, transparent 0%, var(--color-bg) 80%),
+    linear-gradient(to right, #818cf80f 1px, transparent 1px),
+    linear-gradient(to bottom, #818cf80f 1px, transparent 1px);
+  background-size: 100% 100%, 24px 24px, 24px 24px;
 }
 
-.app-main {
-  position: relative;
-  overflow: hidden;
+.grad-text {
+  background: linear-gradient(135deg, #818cf8, #a78bfa 50%, #22d3ee);
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
 }
 
-.empty-state {
-  position: absolute;
-  inset: 0;
-  display: grid;
-  place-items: center;
-  text-align: center;
-}
-
-.empty-state h1 {
-  font-size: 1.5rem;
-  font-weight: 700;
-  letter-spacing: var(--tracking-tight);
-  margin: 0 0 0.5rem;
-}
-
-.empty-state p {
-  color: var(--color-text-dim);
-  margin: 0;
-  max-width: 36ch;
+.elev {
+  box-shadow: 0 1px 0 #ffffff05 inset, 0 18px 40px -24px #000c;
 }
