@@ -180,6 +180,16 @@ export function registerIpcHandlers(pool: RunnerPool, desks: DeskStore): void {
 
   // ---- Settings -----------------------------------------------------------
 
+  // Desktop preferences -----------------------------------------------------
+  handle('prefs.read', async () => {
+    const { readPrefs } = await import('./prefs');
+    return readPrefs();
+  });
+  handle('prefs.update', async (patch) => {
+    const { updatePrefs } = await import('./prefs');
+    return updatePrefs(patch);
+  });
+
   handle('settings.fetchProviderModels', async ({ provider }) => {
     const { fetchProviderModels } = await import('./provider-discovery');
     return await fetchProviderModels(provider);

@@ -7,8 +7,10 @@ import {
 } from './lib/useConnection';
 import { ChatStoreBridge } from './lib/useChat';
 import { chatStore } from './lib/chatStore';
+import { usePrefs } from './lib/usePrefs';
 import { ConnectionScreen } from './connection/ConnectionScreen';
 import { OnboardingWizard } from './onboarding/OnboardingWizard';
+import { FirstRunWizard } from './onboarding/FirstRunWizard';
 import { ChatSurface } from './chat/ChatSurface';
 import { WorkspaceSidebar, type View } from './shell/WorkspaceSidebar';
 import { ContextRail } from './shell/ContextRail';
@@ -29,11 +31,16 @@ import { Splash } from './Splash';
 export function App(): JSX.Element {
   const activeWorkspaceId = useActiveWorkspaceId();
   const { snapshot, hasEverConnected, retry } = useConnection(activeWorkspaceId);
+  const { prefs, loading: prefsLoading } = usePrefs();
   const phase = snapshot?.phase;
   const [forceWizard, setForceWizard] = useState(false);
   const [view, setView] = useState<View>('chat');
   const [railOpen, setRailOpen] = useState(true);
   const [lastConnected, setLastConnected] = useState<typeof phase>(undefined);
+  // Local flag that flips the moment the user clicks "Open my
+  // workspaces" in the FirstRunWizard, so we don't re-render the
+  // wizard while waiting for prefs.read to round-trip.
+  const [justFinishedOnboarding, setJustFinishedOnboarding] = useState(false);
   if (phase?.phase === 'connected' && phase !== lastConnected) {
     setLastConnected(phase);
   }
@@ -43,6 +50,28 @@ export function App(): JSX.Element {
   useEffect(() => {
     chatStore.setActive(activeWorkspaceId);
   }, [activeWorkspaceId]);
+
+  // First-run gate. Block on prefs loading so we never flash the
+  // main UI before deciding whether onboarding is needed.
+  if (prefsLoading) {
+    return (
+      <>
+        <ConnectionBridge />
+        <ChatStoreBridge />
+        <Splash message="Loading preferences…" />
+      </>
+    );
+  }
+
+  if (prefs && !prefs.onboardingComplete && !justFinishedOnboarding) {
+    return (
+      <>
+        <ConnectionBridge />
+        <ChatStoreBridge />
+        <FirstRunWizard onComplete={() => setJustFinishedOnboarding(true)} />
+      </>
+    );
+  }
 
   // Hold the splash until we have a connection snapshot for some
   // workspace AND we know who the active one is.

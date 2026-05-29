@@ -76,6 +76,16 @@ export interface InstallProgressLine {
   line: string;
 }
 
+// ---------- Desktop preferences (first-run + auth state) -------------------
+
+export interface DesktopPrefs {
+  onboardingComplete: boolean;
+  clerkUserId: string | null;
+  clerkDisplayName: string | null;
+  signedInAt: number | null;
+  version: 1;
+}
+
 // ---------- Workflows ------------------------------------------------------
 
 export interface WorkflowSummary {
@@ -263,6 +273,10 @@ export interface IpcCommands {
   'workflows.run': (args: { name: string }) => Promise<WorkflowRun>;
 
   // Settings
+  // Desktop preferences (separate from runner preferences).
+  'prefs.read': () => Promise<DesktopPrefs>;
+  'prefs.update': (patch: Partial<DesktopPrefs>) => Promise<DesktopPrefs>;
+
   /** Provider list for the given workspace (defaults to active). */
   'settings.providers': (args?: { workspaceId?: string }) => Promise<ReadonlyArray<ProviderEntry>>;
   /** Hit the provider's /v1/models endpoint and return the model ids
