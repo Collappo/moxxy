@@ -339,61 +339,78 @@ function MiniVoice({
   return (
     <div style={style.panel}>
       <MiniHeader title="Voice" onBack={onBack} />
-      <div
-        style={{
-          ...style.panelBody,
-          flexDirection: 'column',
-          alignItems: 'center',
-          justifyContent: 'center',
-          gap: 8,
-        }}
-      >
-        {analyser && phase === 'recording' && <Spectroscope analyser={analyser} />}
-        <button
-          type="button"
-          onClick={() => (phase === 'recording' ? stop() : void start())}
-          disabled={phase === 'transcribing' || phase === 'unavailable'}
-          style={{
-            ...style.micButton,
-            ...(phase === 'recording' ? style.micButtonRecording : null),
-            ...(phase === 'transcribing' || phase === 'unavailable'
-              ? style.micButtonDisabled
-              : null),
-          }}
-          aria-label={phase === 'recording' ? 'Tap to stop' : 'Tap to record'}
-        >
-          <MicIcon big />
-        </button>
-        {transcript ? (
-          <div style={style.transcript}>{transcript}</div>
-        ) : (
-          <div style={style.hint}>
-            {phase === 'recording'
-              ? 'Listening — tap mic to stop.'
-              : phase === 'transcribing'
-                ? 'Transcribing…'
-                : phase === 'unavailable'
-                  ? 'No mic / transcriber.'
-                  : 'Tap to record.'}
-          </div>
+      <div style={style.voiceBody}>
+        {/* Ambient background: blurred frequency blobs that pulse
+         *  with the audio. Sits behind every interactive control
+         *  via z-index. */}
+        {analyser && phase === 'recording' && (
+          <SpectroBackground analyser={analyser} />
         )}
-        {transcript && phase === 'idle' && (
-          <button type="button" onClick={sendTranscript} style={style.transcriptSend}>
-            Send
+        <div style={style.voiceContent}>
+          <button
+            type="button"
+            onClick={() => (phase === 'recording' ? stop() : void start())}
+            disabled={phase === 'transcribing' || phase === 'unavailable'}
+            style={{
+              ...style.micButton,
+              ...(phase === 'recording' ? style.micButtonRecording : null),
+              ...(phase === 'transcribing' || phase === 'unavailable'
+                ? style.micButtonDisabled
+                : null),
+            }}
+            aria-label={phase === 'recording' ? 'Tap to stop' : 'Tap to record'}
+          >
+            <MicIcon big />
           </button>
-        )}
+          {transcript ? (
+            <div style={style.transcript}>{transcript}</div>
+          ) : (
+            <div style={style.hint}>
+              {phase === 'recording'
+                ? 'Listening — tap mic to stop.'
+                : phase === 'transcribing'
+                  ? 'Transcribing…'
+                  : phase === 'unavailable'
+                    ? 'No mic / transcriber.'
+                    : 'Tap to record.'}
+            </div>
+          )}
+          {transcript && phase === 'idle' && (
+            <button type="button" onClick={sendTranscript} style={style.transcriptSend}>
+              Send
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );
 }
 
-// ---- Spectroscope --------------------------------------------------------
-// Render the live audio spectrum as bars in moxxy pink. Reads
-// frequency data from an AnalyserNode on each animation frame and
-// paints to a canvas.
+// ---- SpectroBackground ---------------------------------------------------
+// Ambient blurred-blob audio visualiser used as the background of
+// the mini-voice panel. Inspired by the "lava lamp" + "Siri orb"
+// patterns popular on iOS and modern voice-first UIs: a few large
+// translucent gradient circles, each tied to a frequency band,
+// scaled by amplitude and softly blurred so the whole panel feels
+// alive while still letting the foreground mic button + text read.
 
-function Spectroscope({ analyser }: { readonly analyser: AnalyserNode }): JSX.Element {
+const SPECTRO_BLOBS = [
+  { x: 0.18, y: 0.32, baseR: 70, color: 'rgba(236, 72, 153, 0.55)' },
+  { x: 0.82, y: 0.28, baseR: 80, color: 'rgba(217, 70, 239, 0.5)' },
+  { x: 0.5, y: 0.74, baseR: 90, color: 'rgba(167, 139, 250, 0.45)' },
+  { x: 0.28, y: 0.82, baseR: 55, color: 'rgba(244, 114, 182, 0.45)' },
+  { x: 0.72, y: 0.85, baseR: 60, color: 'rgba(192, 132, 252, 0.4)' },
+];
+
+function SpectroBackground({
+  analyser,
+}: {
+  readonly analyser: AnalyserNode;
+}): JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  // EMA smoothing keeps the blobs "breathing" instead of jittering
+  // on every frame's noise.
+  const smoothedRef = useRef<number[]>(SPECTRO_BLOBS.map(() => 0));
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -403,54 +420,85 @@ function Spectroscope({ analyser }: { readonly analyser: AnalyserNode }): JSX.El
 
     const bufferLength = analyser.frequencyBinCount;
     const data = new Uint8Array(bufferLength);
-    let frame = 0;
     let raf = 0;
 
-    const dpr = window.devicePixelRatio || 1;
-    const cssWidth = 280;
-    const cssHeight = 36;
-    canvas.width = Math.round(cssWidth * dpr);
-    canvas.height = Math.round(cssHeight * dpr);
-    canvas.style.width = `${cssWidth}px`;
-    canvas.style.height = `${cssHeight}px`;
-    ctx.scale(dpr, dpr);
-
-    const barCount = 24;
-    const barWidth = (cssWidth - (barCount - 1) * 3) / barCount;
+    const sizeCanvas = (): void => {
+      const dpr = window.devicePixelRatio || 1;
+      const cssW = canvas.clientWidth;
+      const cssH = canvas.clientHeight;
+      if (cssW === 0 || cssH === 0) return;
+      canvas.width = Math.round(cssW * dpr);
+      canvas.height = Math.round(cssH * dpr);
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    };
+    sizeCanvas();
+    const ro = new ResizeObserver(sizeCanvas);
+    ro.observe(canvas);
 
     const draw = (): void => {
       raf = requestAnimationFrame(draw);
       analyser.getByteFrequencyData(data);
-      ctx.clearRect(0, 0, cssWidth, cssHeight);
-      const gradient = ctx.createLinearGradient(0, 0, cssWidth, 0);
-      gradient.addColorStop(0, '#ec4899');
-      gradient.addColorStop(1, '#d946ef');
-      ctx.fillStyle = gradient;
+      const w = canvas.clientWidth;
+      const h = canvas.clientHeight;
+      if (w === 0 || h === 0) return;
 
-      // Group analyser bins into `barCount` bars (linear binning is
-      // fine for this small a visualisation).
-      const binsPerBar = Math.floor(bufferLength / barCount) || 1;
-      for (let i = 0; i < barCount; i++) {
+      // Bucket the frequency bins into one band per blob.
+      const binsPerBlob = Math.max(1, Math.floor(bufferLength / SPECTRO_BLOBS.length));
+      const smoothed = smoothedRef.current;
+      for (let i = 0; i < SPECTRO_BLOBS.length; i++) {
         let sum = 0;
-        for (let j = 0; j < binsPerBar; j++) {
-          sum += data[i * binsPerBar + j] ?? 0;
+        for (let j = 0; j < binsPerBlob; j++) {
+          sum += data[i * binsPerBlob + j] ?? 0;
         }
-        const avg = sum / binsPerBar / 255;
-        const h = Math.max(2, Math.round(avg * cssHeight));
-        const x = i * (barWidth + 3);
-        const y = cssHeight - h;
-        ctx.fillRect(x, y, barWidth, h);
+        const amp = sum / binsPerBlob / 255;
+        // EMA: 0.18 toward the new value, 0.82 toward the prior.
+        smoothed[i] = (smoothed[i] ?? 0) * 0.82 + amp * 0.18;
       }
-      frame++;
+
+      ctx.clearRect(0, 0, w, h);
+      ctx.globalCompositeOperation = 'screen';
+      for (let i = 0; i < SPECTRO_BLOBS.length; i++) {
+        const blob = SPECTRO_BLOBS[i]!;
+        const amp = smoothed[i] ?? 0;
+        const r = blob.baseR + amp * 60;
+        const cx = blob.x * w;
+        const cy = blob.y * h;
+        const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+        grad.addColorStop(0, blob.color);
+        grad.addColorStop(1, 'rgba(255, 255, 255, 0)');
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.arc(cx, cy, r, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.globalCompositeOperation = 'source-over';
     };
     draw();
     return () => {
       cancelAnimationFrame(raf);
-      void frame;
+      ro.disconnect();
     };
   }, [analyser]);
 
-  return <canvas ref={canvasRef} aria-hidden style={{ display: 'block' }} />;
+  return (
+    <canvas
+      ref={canvasRef}
+      aria-hidden
+      style={{
+        position: 'absolute',
+        inset: 0,
+        width: '100%',
+        height: '100%',
+        // Heavy blur fuses the individual blobs into a single
+        // organic gradient cloud, so the user perceives a
+        // continuous reactive glow rather than discrete circles.
+        filter: 'blur(28px) saturate(1.1)',
+        WebkitFilter: 'blur(28px) saturate(1.1)',
+        zIndex: 0,
+        pointerEvents: 'none',
+      }}
+    />
+  );
 }
 
 // ---- Helpers -------------------------------------------------------------
@@ -896,6 +944,24 @@ const style: Record<string, React.CSSProperties> = {
     alignItems: 'center',
     minHeight: 0,
   },
+  voiceBody: {
+    flex: 1,
+    position: 'relative',
+    minHeight: 0,
+    overflow: 'hidden',
+  },
+  voiceContent: {
+    position: 'absolute',
+    inset: 0,
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    padding: '10px 14px',
+    boxSizing: 'border-box',
+    zIndex: 1,
+  },
   lineRow: {
     display: 'inline-flex',
     alignItems: 'center',
@@ -943,6 +1009,9 @@ const style: Record<string, React.CSSProperties> = {
     display: 'inline-flex',
     alignItems: 'center',
     justifyContent: 'center',
+    // Soft white halo so the button reads above the blurred
+    // background even when the blobs swell up behind it.
+    boxShadow: '0 0 0 6px rgba(255, 255, 255, 0.5)',
   },
   micButtonRecording: {
     background: '#ef4444',
@@ -962,8 +1031,15 @@ const style: Record<string, React.CSSProperties> = {
   },
   hint: {
     fontSize: 12,
-    color: '#64748b',
+    color: '#475569',
     letterSpacing: '0.02em',
+    // Frosted pill so the hint stays legible over the blurred
+    // gradient cloud behind it.
+    background: 'rgba(255, 255, 255, 0.7)',
+    padding: '3px 10px',
+    borderRadius: 999,
+    backdropFilter: 'blur(4px)',
+    WebkitBackdropFilter: 'blur(4px)',
   },
   transcriptSend: {
     padding: '6px 14px',
