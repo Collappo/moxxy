@@ -77,8 +77,23 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });
 
-app.on('before-quit', async () => {
-  if (supervisor) {
-    await supervisor.stop().catch(() => undefined);
-  }
+let isQuitting = false;
+app.on('before-quit', (event) => {
+  // Electron does NOT await the before-quit handler; if we just
+  // returned a Promise, the process would exit before stop() landed
+  // and the child runner would survive as a zombie. Trap the first
+  // quit, run cleanup, then fire app.exit() explicitly.
+  if (isQuitting) return;
+  isQuitting = true;
+  event.preventDefault();
+  void shutdown().finally(() => app.exit(0));
 });
+
+async function shutdown(): Promise<void> {
+  if (!supervisor) return;
+  await Promise.race([
+    supervisor.stop().catch(() => undefined),
+    // Belt-and-braces timeout: don't hang the app on a stuck child.
+    new Promise<void>((resolve) => setTimeout(resolve, 2000)),
+  ]);
+}
