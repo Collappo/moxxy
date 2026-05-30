@@ -74,6 +74,7 @@ export class RunnerServer {
   private readonly turnControllers = new Map<TurnId, AbortController>();
   private readonly scope = new AsyncLocalStorage<TurnScope>();
   private readonly logUnsub: () => void;
+  private readonly modesUnsub: () => void;
   /**
    * Resolvers for unscoped (local) turns - the fall-through path. Seeded from
    * whatever was installed before we wrapped the session, then kept current by
@@ -93,6 +94,9 @@ export class RunnerServer {
     this.installRoutingResolvers();
     this.transport.onConnection((t) => this.onConnection(t));
     this.logUnsub = session.log.subscribe((event) => this.broadcastEvent(event));
+    // Mirror active-mode changes to clients — covers both the SetMode RPC and a
+    // mode handing off to another mode post-turn (BMAD → tool-use).
+    this.modesUnsub = session.modes.onActiveChange(() => this.broadcastInfo());
   }
 
   get address(): string {
@@ -103,6 +107,7 @@ export class RunnerServer {
     if (this.closed) return;
     this.closed = true;
     this.logUnsub();
+    this.modesUnsub();
     for (const client of this.clients) client.peer.close();
     this.clients.clear();
     await this.transport.close();
@@ -240,8 +245,9 @@ export class RunnerServer {
 
   private handleModeSetActive(raw: unknown): Record<string, never> {
     const { name } = modeSetActiveParamsSchema.parse(raw);
+    // setActive fires onActiveChange → broadcastInfo (wired in the ctor), so
+    // no explicit broadcast needed here.
     this.session.modes.setActive(name);
-    this.broadcastInfo();
     return {};
   }
 
