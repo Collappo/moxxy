@@ -840,24 +840,6 @@ const style: Record<string, React.CSSProperties> = {
     alignItems: 'center',
     minHeight: 0,
   },
-  voiceBody: {
-    flex: 1,
-    position: 'relative',
-    minHeight: 0,
-    overflow: 'hidden',
-  },
-  voiceContent: {
-    position: 'absolute',
-    inset: 0,
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 10,
-    padding: '10px 14px',
-    boxSizing: 'border-box',
-    zIndex: 1,
-  },
   lineRow: {
     display: 'inline-flex',
     alignItems: 'center',
@@ -894,81 +876,6 @@ const style: Record<string, React.CSSProperties> = {
     alignItems: 'center',
     justifyContent: 'center',
     flexShrink: 0,
-  },
-  micButton: {
-    width: 84,
-    height: 84,
-    border: 'none',
-    borderRadius: '50%',
-    // Conic-style gradient via radial — gives the button a 3D
-    // sphere feel with a brighter highlight at top-left.
-    background:
-      'radial-gradient(circle at 35% 30%, #ffffff 0%, #f9a8d4 18%, #ec4899 45%, #a855f7 88%)',
-    color: '#fff',
-    cursor: 'pointer',
-    display: 'inline-flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    // Multi-layer shadow + inner highlight for a premium glass-bead
-    // look: white halo ring + soft outer glow + thin pink inner
-    // accent.
-    boxShadow: [
-      '0 0 0 4px rgba(255, 255, 255, 0.85)',
-      '0 0 0 5px rgba(236, 72, 153, 0.25)',
-      '0 12px 32px -8px rgba(168, 85, 247, 0.55)',
-      'inset 0 -6px 14px rgba(168, 85, 247, 0.35)',
-      'inset 0 4px 6px rgba(255, 255, 255, 0.55)',
-    ].join(', '),
-    transition: 'transform 140ms ease, box-shadow 200ms ease',
-  },
-  micButtonRecording: {
-    // Recording state: warmer / hotter gradient + bigger pulsing
-    // ring. Drives the live-mic feel — "I am hearing you."
-    background:
-      'radial-gradient(circle at 35% 30%, #ffffff 0%, #fda4af 18%, #ef4444 50%, #be123c 92%)',
-    boxShadow: [
-      '0 0 0 4px rgba(255, 255, 255, 0.85)',
-      '0 0 0 9px rgba(239, 68, 68, 0.35)',
-      '0 14px 36px -6px rgba(239, 68, 68, 0.6)',
-      'inset 0 -6px 14px rgba(190, 18, 60, 0.45)',
-      'inset 0 4px 6px rgba(255, 255, 255, 0.55)',
-    ].join(', '),
-    animation: 'focus-mic-pulse 1.6s ease-in-out infinite',
-  },
-  micButtonDisabled: {
-    opacity: 0.55,
-    cursor: 'default',
-    animation: 'none',
-  },
-  transcript: {
-    fontSize: 12.5,
-    color: '#0f172a',
-    padding: '6px 10px',
-    background: '#f8fafc',
-    border: '1px solid rgba(15, 23, 42, 0.12)',
-    maxWidth: '100%',
-    textAlign: 'center',
-  },
-  hint: {
-    fontSize: 12,
-    color: '#475569',
-    letterSpacing: '0.02em',
-    // Frosted pill so the hint stays legible over the blurred
-    // gradient cloud behind it.
-    background: 'rgba(255, 255, 255, 0.7)',
-    padding: '3px 10px',
-    borderRadius: 999,
-    backdropFilter: 'blur(4px)',
-    WebkitBackdropFilter: 'blur(4px)',
-  },
-  transcriptSend: {
-    padding: '6px 14px',
-    fontSize: 12,
-    fontWeight: 700,
-    border: 'none',
-    background: 'linear-gradient(135deg, #ec4899, #d946ef)',
-    color: '#fff',
-    cursor: 'pointer',
   },
 };
 
