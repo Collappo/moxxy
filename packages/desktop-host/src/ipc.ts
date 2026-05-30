@@ -205,6 +205,23 @@ export function registerIpcHandlers(pool: RunnerPool, desks: DeskStore): void {
     const result = await dialog.showOpenDialog(window ?? null!, {
       title: 'Attach a file to the next prompt',
       properties: ['openFile'],
+      // Restrict to what the agent can actually use: images + text/code.
+      // buildAttachments is the real gate (it drops binary/oversized), but
+      // the filter steers the picker so the user doesn't pick a 4 GB video.
+      filters: [
+        {
+          name: 'Attachable files',
+          extensions: [
+            'png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp',
+            'txt', 'md', 'markdown', 'json', 'yaml', 'yml', 'csv', 'tsv', 'log', 'sql',
+            'js', 'jsx', 'ts', 'tsx', 'py', 'rb', 'go', 'rs', 'java', 'kt', 'c', 'h',
+            'cpp', 'hpp', 'cs', 'php', 'sh', 'bash', 'zsh', 'html', 'css', 'scss',
+            'xml', 'toml', 'ini', 'env', 'conf',
+          ],
+        },
+        { name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'] },
+        { name: 'All files', extensions: ['*'] },
+      ],
     });
     if (result.canceled || result.filePaths.length === 0) return null;
     return result.filePaths[0]!;

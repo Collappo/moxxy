@@ -16,9 +16,11 @@ import { randomUUID } from 'node:crypto';
 import type { BrowserWindow } from 'electron';
 
 import type { RemoteSession } from '@moxxy/runner';
+import type { UserPromptAttachment } from '@moxxy/sdk';
 
 import type { IpcEvents } from '@moxxy/desktop-ipc-contract';
 import { openAsk, cancelAsksFor } from './ask-broker.js';
+import { buildAttachments } from './attachments.js';
 
 interface ActiveTurn {
   controller: AbortController;
@@ -127,21 +129,16 @@ export class SessionDriver {
         const opts: {
           signal: AbortSignal;
           model?: string;
-          attachments?: ReadonlyArray<{
-            kind: 'file';
-            content: string;
-            name: string;
-          }>;
+          attachments?: ReadonlyArray<UserPromptAttachment>;
         } = {
           signal: controller.signal,
         };
         if (model) opts.model = model;
         if (attachments && attachments.length > 0) {
-          opts.attachments = attachments.map((a) => ({
-            kind: 'file',
-            content: a.path,
-            name: a.name,
-          }));
+          // Read each file in the main process and build a real attachment
+          // (image base64 / inline text) — the renderer only had the path.
+          const built = await buildAttachments(attachments);
+          if (built.length > 0) opts.attachments = built;
         }
         // RemoteSession's runTurn forwards opts.attachments verbatim
         // to the runner's RunTurnParams, where each becomes a
