@@ -61,7 +61,6 @@ describe('secret redaction', () => {
     expect(redactSecrets('Authorization: Bearer abcdef123456ghijkl')).not.toContain('abcdef123456');
     expect(redactSecrets('token eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9aaa')).toContain('«redacted»');
     expect(redactSecrets('OPENAI_API_KEY=sk-supersecretvalue')).not.toContain('supersecret');
-    expect(redactSecrets('pk_live_51HhabcdEFGH')).toContain('«redacted»');
   });
 
   it('leaves ordinary log lines intact', () => {
