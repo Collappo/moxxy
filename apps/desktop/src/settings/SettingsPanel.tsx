@@ -1,15 +1,26 @@
 import { useState } from 'react';
 import { useSettings } from '@/lib/useSettings';
 import { Skeleton } from '@/lib/Skeleton';
+import { Icon } from '@/lib/Icon';
 import { SkillsView } from './SkillsView';
 
 type Tab = 'providers' | 'mcp' | 'skills' | 'vault';
 
+const TABS: ReadonlyArray<{ id: Tab; label: string }> = [
+  { id: 'providers', label: 'Providers' },
+  { id: 'mcp', label: 'MCP' },
+  { id: 'skills', label: 'Skills' },
+  { id: 'vault', label: 'Vault' },
+];
+
 /**
- * Tabbed settings panel — providers, MCP servers, skills, vault. Each
- * tab reads its slice via `useSettings` and only the active tab does
- * heavy work (the IPC fan-out happens on refresh; tab switch is just
- * filtering the rendered view).
+ * Tabbed settings panel — providers, MCP servers, skills, vault. Each tab
+ * reads its slice via `useSettings` and only the active tab does heavy work
+ * (the IPC fan-out happens on refresh; tab switch just swaps the view).
+ *
+ * Providers / MCP / Vault share one list language: a leading icon tile, a
+ * name + status subtitle in a flexible middle column, and a right-aligned
+ * status dot / toggle / badge — so every row lines up on the same grid.
  */
 export function SettingsPanel(): JSX.Element {
   const s = useSettings();
@@ -20,70 +31,96 @@ export function SettingsPanel(): JSX.Element {
       style={{
         flex: 1,
         overflowY: 'auto',
-        padding: '1.5rem 2rem',
+        padding: '28px 32px 40px',
         display: 'flex',
         flexDirection: 'column',
-        gap: '1rem',
+        gap: 20,
       }}
     >
-      <header style={{ display: 'flex', alignItems: 'baseline', gap: '1rem' }}>
-        <h1 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 700 }}>
+      <header style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+        <h1 style={{ margin: 0, fontSize: 21, fontWeight: 700, letterSpacing: '-0.01em' }}>
           Settings
         </h1>
-        <nav style={{ display: 'flex', gap: '0.25rem' }}>
-          {(['providers', 'mcp', 'skills', 'vault'] as const).map((t) => (
-            <button
-              key={t}
-              type="button"
-              data-testid={`settings-tab-${t}`}
-              data-active={tab === t}
-              onClick={() => setTab(t)}
-              style={{
-                padding: '0.3rem 0.7rem',
-                fontSize: '0.8rem',
-                color: tab === t ? 'var(--color-text)' : 'var(--color-text-muted)',
-                borderBottom:
-                  tab === t
-                    ? '2px solid var(--color-primary)'
-                    : '2px solid transparent',
-              }}
-            >
-              {t}
-            </button>
-          ))}
-        </nav>
-        <button
-          type="button"
-          onClick={() => void s.refresh()}
+        <nav
           style={{
-            marginLeft: 'auto',
-            fontSize: '0.75rem',
-            color: 'var(--color-text-dim)',
-            border: '1px solid var(--color-border)',
-            borderRadius: 'var(--radius-block)',
-            padding: '0.2rem 0.55rem',
+            display: 'inline-flex',
+            gap: 2,
+            padding: 3,
+            background: '#f1f2f9',
+            borderRadius: 12,
           }}
         >
+          {TABS.map((t) => {
+            const active = tab === t.id;
+            return (
+              <button
+                key={t.id}
+                type="button"
+                data-testid={`settings-tab-${t.id}`}
+                data-active={active}
+                onClick={() => setTab(t.id)}
+                style={{
+                  padding: '6px 15px',
+                  fontSize: 13,
+                  fontWeight: 600,
+                  borderRadius: 9,
+                  color: active ? 'var(--color-text)' : 'var(--color-text-muted)',
+                  background: active ? '#fff' : 'transparent',
+                  boxShadow: active ? '0 1px 3px rgba(15, 23, 42, 0.12)' : 'none',
+                  transition: 'background 140ms, color 140ms',
+                }}
+              >
+                {t.label}
+              </button>
+            );
+          })}
+        </nav>
+        <span style={{ flex: 1 }} />
+        <button
+          type="button"
+          className="btn-chip"
+          onClick={() => void s.refresh()}
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 6,
+            fontSize: 12.5,
+            fontWeight: 600,
+            color: 'var(--color-text-muted)',
+            border: '1px solid var(--color-card-border)',
+            borderRadius: 9,
+            padding: '6px 12px',
+            background: '#fff',
+          }}
+        >
+          <Icon name="rotate" size={14} />
           Refresh
         </button>
       </header>
+
       {s.error && (
-        <p
+        <div
           role="alert"
           style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 9,
             margin: 0,
-            padding: '0.45rem 0.65rem',
-            border: '1px solid var(--color-pink)',
-            background: 'color-mix(in oklab, var(--color-pink) 12%, transparent)',
-            borderRadius: 'var(--radius-block)',
-            fontSize: '0.85rem',
+            padding: '10px 14px',
+            border: '1px solid color-mix(in oklab, var(--color-red) 30%, transparent)',
+            background: 'color-mix(in oklab, var(--color-red) 8%, transparent)',
+            borderRadius: 12,
+            fontSize: 13,
+            color: 'var(--color-red)',
           }}
         >
+          <Icon name="x" size={15} />
           {s.error}
-        </p>
+        </div>
       )}
+
       {s.loading ? (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           <Skeleton.Card />
           <Skeleton.Card />
           <Skeleton.Card />
@@ -100,26 +137,42 @@ export function SettingsPanel(): JSX.Element {
   );
 }
 
+// ---- tabs -----------------------------------------------------------------
+
 function ProvidersTab({
   providers,
 }: {
   readonly providers: ReturnType<typeof useSettings>['providers'];
 }): JSX.Element {
-  if (providers.length === 0) {
-    return <EmptyNote>No providers known to the connected runner.</EmptyNote>;
-  }
   return (
-    <CardList>
-      {providers.map((p) => (
-        <RowCard
-          key={p.name}
-          title={p.name}
-          badge={
-            <Badge tone={p.ready ? 'ok' : 'muted'}>{p.ready ? 'Ready' : 'Not ready'}</Badge>
-          }
-        />
-      ))}
-    </CardList>
+    <Section
+      title="Providers"
+      count={providers.length}
+      description="Model providers the runner can route to. Add a provider's key in the vault to activate it."
+    >
+      {providers.length === 0 ? (
+        <EmptyState icon="spark" text="No providers known to the connected runner." />
+      ) : (
+        <CardList>
+          {providers.map((p) => {
+            const { bg, fg } = tintFor(p.name);
+            return (
+              <Row
+                key={p.name}
+                tile={
+                  <Tile bg={bg} fg={fg}>
+                    {p.name.slice(0, 1).toUpperCase()}
+                  </Tile>
+                }
+                title={p.name}
+                subtitle={p.ready ? 'Active · credentials resolved' : 'Inactive · add a key to use'}
+                trailing={<StatusDot ok={p.ready} okLabel="Ready" offLabel="Inactive" />}
+              />
+            );
+          })}
+        </CardList>
+      )}
+    </Section>
   );
 }
 
@@ -130,26 +183,45 @@ function McpTab({
   readonly servers: ReadonlyArray<{ name: string; enabled: boolean; connected: boolean }>;
   readonly onToggle: (name: string, enabled: boolean) => Promise<void>;
 }): JSX.Element {
-  if (servers.length === 0) {
-    return <EmptyNote>No MCP servers configured.</EmptyNote>;
-  }
   return (
-    <CardList>
-      {servers.map((srv) => (
-        <RowCard
-          key={srv.name}
-          testId={`mcp-row-${srv.name}`}
-          title={srv.name}
-          subtitle={`${srv.enabled ? 'enabled' : 'disabled'} · ${srv.connected ? 'connected' : 'detached'}`}
-          badge={
-            srv.connected ? <Badge tone="ok">Connected</Badge> : <Badge tone="muted">Detached</Badge>
-          }
-          action={
-            <ToggleButton enabled={srv.enabled} onClick={() => void onToggle(srv.name, !srv.enabled)} />
-          }
-        />
-      ))}
-    </CardList>
+    <Section
+      title="MCP servers"
+      count={servers.length}
+      description="Model Context Protocol servers. Toggle one on to attach its tools to the agent."
+    >
+      {servers.length === 0 ? (
+        <EmptyState icon="plug" text="No MCP servers configured." />
+      ) : (
+        <CardList>
+          {servers.map((srv) => (
+            <Row
+              key={srv.name}
+              testId={`mcp-row-${srv.name}`}
+              tile={
+                <Tile bg="var(--color-primary-soft)" fg="var(--color-primary-strong)">
+                  <Icon name="plug" size={18} />
+                </Tile>
+              }
+              title={srv.name}
+              subtitle={
+                srv.connected
+                  ? 'Connected · tools attached'
+                  : srv.enabled
+                    ? 'Enabled · connecting…'
+                    : 'Detached'
+              }
+              trailing={
+                <Switch
+                  on={srv.enabled}
+                  label={`${srv.enabled ? 'Disable' : 'Enable'} ${srv.name}`}
+                  onClick={() => void onToggle(srv.name, !srv.enabled)}
+                />
+              }
+            />
+          ))}
+        </CardList>
+      )}
+    </Section>
   );
 }
 
@@ -159,20 +231,79 @@ function VaultTab({
   readonly vault: ReadonlyArray<{ name: string }>;
 }): JSX.Element {
   return (
-    <>
-      <EmptyNote>Vault entries — names only; values are encrypted at rest by the moxxy CLI.</EmptyNote>
-      {vault.length > 0 && (
+    <Section
+      title="Vault"
+      count={vault.length}
+      description="Secrets stored by the moxxy CLI. Names only — values are encrypted at rest and never leave the host."
+    >
+      {vault.length === 0 ? (
+        <EmptyState icon="lock" text="The vault is empty." />
+      ) : (
         <CardList>
           {vault.map((v) => (
-            <RowCard key={v.name} title={v.name} mono badge={<Badge tone="muted">Encrypted</Badge>} />
+            <Row
+              key={v.name}
+              mono
+              tile={
+                <Tile bg="rgba(148, 163, 184, 0.18)" fg="var(--color-text-muted)">
+                  <Icon name="lock" size={16} />
+                </Tile>
+              }
+              title={v.name}
+              trailing={<Badge>Encrypted</Badge>}
+            />
           ))}
         </CardList>
       )}
-    </>
+    </Section>
   );
 }
 
-// ---- shared card primitives ----------------------------------------------
+// ---- shared list primitives ----------------------------------------------
+
+function Section({
+  title,
+  count,
+  description,
+  children,
+}: {
+  readonly title: string;
+  readonly count?: number;
+  readonly description?: string;
+  readonly children: React.ReactNode;
+}): JSX.Element {
+  return (
+    <section style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+          <h2 style={{ margin: 0, fontSize: 15, fontWeight: 700 }}>{title}</h2>
+          {count !== undefined && (
+            <span
+              style={{
+                minWidth: 22,
+                textAlign: 'center',
+                padding: '1px 7px',
+                borderRadius: 999,
+                fontSize: 11,
+                fontWeight: 700,
+                color: 'var(--color-text-muted)',
+                background: 'rgba(148, 163, 184, 0.16)',
+              }}
+            >
+              {count}
+            </span>
+          )}
+        </div>
+        {description && (
+          <p style={{ margin: '4px 0 0', fontSize: 12.5, color: 'var(--color-text-dim)', lineHeight: 1.5 }}>
+            {description}
+          </p>
+        )}
+      </div>
+      {children}
+    </section>
+  );
+}
 
 function CardList({ children }: { readonly children: React.ReactNode }): JSX.Element {
   return (
@@ -185,18 +316,18 @@ function CardList({ children }: { readonly children: React.ReactNode }): JSX.Ele
   );
 }
 
-function RowCard({
+function Row({
+  tile,
   title,
   subtitle,
-  badge,
-  action,
+  trailing,
   mono,
   testId,
 }: {
+  readonly tile: React.ReactNode;
   readonly title: string;
   readonly subtitle?: string;
-  readonly badge?: React.ReactNode;
-  readonly action?: React.ReactNode;
+  readonly trailing?: React.ReactNode;
   readonly mono?: boolean;
   readonly testId?: string;
 }): JSX.Element {
@@ -206,18 +337,19 @@ function RowCard({
       style={{
         display: 'flex',
         alignItems: 'center',
-        gap: 12,
-        padding: '12px 14px',
+        gap: 14,
+        padding: '13px 16px',
         background: 'var(--color-card-bg)',
         border: '1px solid var(--color-card-border)',
-        borderRadius: 12,
+        borderRadius: 14,
       }}
     >
+      {tile}
       <div style={{ flex: 1, minWidth: 0 }}>
         <div
           className={mono ? 'mono' : undefined}
           style={{
-            fontSize: 13.5,
+            fontSize: 14,
             fontWeight: 600,
             color: 'var(--color-text)',
             whiteSpace: 'nowrap',
@@ -228,39 +360,38 @@ function RowCard({
           {title}
         </div>
         {subtitle && (
-          <div className="mono" style={{ fontSize: 11, color: 'var(--color-text-dim)', marginTop: 2 }}>
-            {subtitle}
-          </div>
+          <div style={{ marginTop: 2, fontSize: 12, color: 'var(--color-text-dim)' }}>{subtitle}</div>
         )}
       </div>
-      {badge}
-      {action}
+      {trailing}
     </li>
   );
 }
 
-type BadgeTone = 'ok' | 'muted' | 'warn' | 'error';
-
-function Badge({ tone, children }: { readonly tone: BadgeTone; readonly children: React.ReactNode }): JSX.Element {
-  const palette: Record<BadgeTone, { bg: string; fg: string }> = {
-    ok: { bg: '#ecfdf5', fg: 'var(--color-green)' },
-    muted: { bg: 'rgba(148, 163, 184, 0.16)', fg: 'var(--color-text-muted)' },
-    warn: { bg: '#fffbeb', fg: 'var(--color-amber)' },
-    error: { bg: '#fef2f2', fg: 'var(--color-red)' },
-  };
-  const c = palette[tone];
+function Tile({
+  children,
+  bg,
+  fg,
+}: {
+  readonly children: React.ReactNode;
+  readonly bg: string;
+  readonly fg: string;
+}): JSX.Element {
   return (
     <span
+      aria-hidden
       style={{
+        width: 38,
+        height: 38,
         flexShrink: 0,
-        fontSize: 10.5,
+        borderRadius: 11,
+        background: bg,
+        color: fg,
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        fontSize: 15,
         fontWeight: 700,
-        textTransform: 'uppercase',
-        letterSpacing: '0.04em',
-        padding: '3px 9px',
-        borderRadius: 999,
-        background: c.bg,
-        color: c.fg,
       }}
     >
       {children}
@@ -268,36 +399,140 @@ function Badge({ tone, children }: { readonly tone: BadgeTone; readonly children
   );
 }
 
-function ToggleButton({
-  enabled,
-  onClick,
+function StatusDot({
+  ok,
+  okLabel,
+  offLabel,
 }: {
-  readonly enabled: boolean;
+  readonly ok: boolean;
+  readonly okLabel: string;
+  readonly offLabel: string;
+}): JSX.Element {
+  return (
+    <span
+      style={{
+        flexShrink: 0,
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 8,
+        fontSize: 12.5,
+        fontWeight: 600,
+        color: ok ? 'var(--color-text-muted)' : 'var(--color-text-dim)',
+      }}
+    >
+      <span
+        aria-hidden
+        style={{
+          width: 8,
+          height: 8,
+          borderRadius: '50%',
+          background: ok ? 'var(--color-green)' : 'var(--color-card-border-strong)',
+          boxShadow: ok ? '0 0 0 3px rgba(16, 185, 129, 0.16)' : 'none',
+        }}
+      />
+      {ok ? okLabel : offLabel}
+    </span>
+  );
+}
+
+/** iOS-style toggle — the MCP attach/detach control. */
+function Switch({
+  on,
+  onClick,
+  label,
+}: {
+  readonly on: boolean;
   readonly onClick: () => void;
+  readonly label: string;
 }): JSX.Element {
   return (
     <button
       type="button"
-      className="btn-chip"
+      role="switch"
+      aria-checked={on}
+      aria-label={label}
       onClick={onClick}
       style={{
         flexShrink: 0,
-        fontSize: 12,
-        fontWeight: 600,
-        padding: '5px 12px',
+        width: 42,
+        height: 24,
+        padding: 2,
         borderRadius: 999,
-        border: enabled ? '1px solid transparent' : '1px solid var(--color-card-border)',
-        background: enabled ? 'var(--color-primary-soft)' : '#fff',
-        color: enabled ? 'var(--color-primary-strong)' : 'var(--color-text-muted)',
+        background: on ? 'var(--color-primary)' : 'var(--color-card-border-strong)',
+        display: 'inline-flex',
+        alignItems: 'center',
+        transition: 'background 160ms ease',
       }}
     >
-      {enabled ? 'Disable' : 'Enable'}
+      <span
+        aria-hidden
+        style={{
+          width: 20,
+          height: 20,
+          borderRadius: '50%',
+          background: '#fff',
+          boxShadow: '0 1px 2px rgba(15, 23, 42, 0.35)',
+          transform: on ? 'translateX(18px)' : 'translateX(0)',
+          transition: 'transform 160ms ease',
+        }}
+      />
     </button>
   );
 }
 
-function EmptyNote({ children }: { readonly children: React.ReactNode }): JSX.Element {
+function Badge({ children }: { readonly children: React.ReactNode }): JSX.Element {
   return (
-    <p style={{ margin: 0, fontSize: 13, color: 'var(--color-text-dim)', lineHeight: 1.6 }}>{children}</p>
+    <span
+      style={{
+        flexShrink: 0,
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 5,
+        fontSize: 10.5,
+        fontWeight: 700,
+        textTransform: 'uppercase',
+        letterSpacing: '0.04em',
+        padding: '3px 9px',
+        borderRadius: 999,
+        background: 'rgba(148, 163, 184, 0.16)',
+        color: 'var(--color-text-muted)',
+      }}
+    >
+      {children}
+    </span>
   );
+}
+
+function EmptyState({
+  icon,
+  text,
+}: {
+  readonly icon: Parameters<typeof Icon>[0]['name'];
+  readonly text: string;
+}): JSX.Element {
+  return (
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        gap: 12,
+        padding: '44px 20px',
+        border: '1px dashed var(--color-card-border)',
+        borderRadius: 14,
+        color: 'var(--color-text-dim)',
+      }}
+    >
+      <Icon name={icon} size={22} />
+      <p style={{ margin: 0, fontSize: 13 }}>{text}</p>
+    </div>
+  );
+}
+
+/** Deterministic soft tint per provider name, so each tile is distinct
+ *  but on-brand (pastel bg, saturated fg from the same hue). */
+function tintFor(name: string): { bg: string; fg: string } {
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) % 360;
+  return { bg: `hsl(${h} 72% 95%)`, fg: `hsl(${h} 55% 42%)` };
 }

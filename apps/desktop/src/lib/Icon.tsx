@@ -31,6 +31,7 @@ type IconName =
   | 'x'
   | 'sliders'
   | 'plug'
+  | 'lock'
   | 'chat'
   | 'workflow'
   | 'settings'
@@ -191,6 +192,12 @@ const paths: Record<IconName, JSX.Element> = {
       <path d="M15 2v6" />
       <path d="M7 8h10v3a5 5 0 0 1-10 0z" />
       <path d="M12 16v6" />
+    </>
+  ),
+  lock: (
+    <>
+      <rect x="4" y="11" width="16" height="10" rx="2" />
+      <path d="M8 11V7a4 4 0 0 1 8 0v4" />
     </>
   ),
   chat: (

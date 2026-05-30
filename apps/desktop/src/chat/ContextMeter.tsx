@@ -8,15 +8,15 @@ import { UsageModal } from './UsageModal';
  * pink → amber → red), and opens the {@link UsageModal} on click for the full
  * token breakdown plus a one-tap compaction.
  *
- * Hidden until the first response lands — there's no context to report
- * before then, and the window size is only known once a provider/model is
- * resolved.
+ * Shown as soon as the active model's context window is known (on connect) —
+ * at 0% before the first reply, filling as the conversation grows. Hidden
+ * only when the window size can't be resolved (no model/provider yet).
  */
 export function ContextMeter({ workspaceId }: { readonly workspaceId: string }): JSX.Element | null {
   const usage = useContextUsage(workspaceId);
   const [open, setOpen] = useState(false);
 
-  if (!usage.hasData || usage.fraction == null) return null;
+  if (usage.fraction == null) return null;
 
   const f = usage.fraction;
   const color = f >= 0.85 ? 'var(--color-red)' : f >= 0.6 ? 'var(--color-amber)' : 'var(--color-primary)';

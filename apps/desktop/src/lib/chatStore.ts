@@ -73,6 +73,8 @@ interface Slot {
    *  transcript's initial-loading spinner). */
   loadingInitial: boolean;
   loadingOlder: boolean;
+  /** Token accounting folded from provider_response events (context meter). */
+  usage: UsageSnapshot;
 }
 
 const EMPTY_QUEUE: ReadonlyArray<QueuedTurn> = Object.freeze([]);
@@ -92,6 +94,61 @@ export const EMPTY_SNAPSHOT: ChatSnapshot = Object.freeze({
   hasOlder: false,
   loading: false,
 });
+
+/**
+ * Token accounting accumulated from `provider_response` events. Those events
+ * carry the provider-reported usage but are NOT rendered or persisted, so they
+ * never enter the display log — we fold them into this side-channel snapshot
+ * instead (powers the composer's context meter + usage modal). O(1) per call.
+ */
+export interface UsageSnapshot {
+  /** Prompt size of the most recent call (input + cache read + cache write). */
+  readonly latestPrompt: number | null;
+  /** Per-call prompt sizes in order — feeds the growth sparkline. */
+  readonly perCall: ReadonlyArray<number>;
+  readonly calls: number;
+  readonly totalInput: number;
+  readonly totalCacheRead: number;
+  readonly totalCacheCreation: number;
+  readonly totalOutput: number;
+}
+
+export const EMPTY_USAGE: UsageSnapshot = Object.freeze({
+  latestPrompt: null,
+  perCall: Object.freeze([]),
+  calls: 0,
+  totalInput: 0,
+  totalCacheRead: 0,
+  totalCacheCreation: 0,
+  totalOutput: 0,
+});
+
+type ProviderResponse = Extract<MoxxyEvent, { type: 'provider_response' }>;
+
+/** Fold one provider_response into the accumulator, or null if it carried no
+ *  usage (so callers can skip a re-render). */
+function recordUsage(prev: UsageSnapshot, e: ProviderResponse): UsageSnapshot | null {
+  const hasUsage =
+    e.inputTokens !== undefined ||
+    e.outputTokens !== undefined ||
+    e.cacheReadTokens !== undefined ||
+    e.cacheCreationTokens !== undefined;
+  if (!hasUsage) return null;
+  const hasPrompt =
+    e.inputTokens !== undefined ||
+    e.cacheReadTokens !== undefined ||
+    e.cacheCreationTokens !== undefined;
+  const prompt = (e.inputTokens ?? 0) + (e.cacheReadTokens ?? 0) + (e.cacheCreationTokens ?? 0);
+  return {
+    latestPrompt: hasPrompt ? prompt : prev.latestPrompt,
+    perCall: hasPrompt ? [...prev.perCall, prompt] : prev.perCall,
+    calls: prev.calls + 1,
+    totalInput: prev.totalInput + (e.inputTokens ?? 0),
+    totalCacheRead: prev.totalCacheRead + (e.cacheReadTokens ?? 0),
+    totalCacheCreation: prev.totalCacheCreation + (e.cacheCreationTokens ?? 0),
+    totalOutput: prev.totalOutput + (e.outputTokens ?? 0),
+  };
+}
 
 class ChatStore {
   private slots = new Map<string, Slot>();
@@ -160,6 +217,12 @@ class ChatStore {
 
   getModel(workspaceId: string): string | null {
     return this.slots.get(workspaceId)?.model ?? null;
+  }
+
+  /** Token accounting folded from this workspace's provider responses.
+   *  Reference-stable until the next response lands (safe for useSyncExternalStore). */
+  getUsage(workspaceId: string): UsageSnapshot {
+    return this.slots.get(workspaceId)?.usage ?? EMPTY_USAGE;
   }
 
   setModel(workspaceId: string, model: string | null): void {
@@ -304,6 +367,19 @@ class ChatStore {
 
   dispatch(workspaceId: string, action: ChatAction): void {
     const slot = this.ensure(workspaceId);
+
+    // provider_response carries token usage but is not a rendered/persisted
+    // event, so it never lands in the log. Fold its usage into the side-channel
+    // accumulator (context meter) and stop — applyAction would no-op for it.
+    if (action.type === 'event' && action.event.type === 'provider_response') {
+      const next = recordUsage(slot.usage, action.event);
+      if (next) {
+        slot.usage = next;
+        this.emit();
+      }
+      return;
+    }
+
     const before = slot.rt.log.length;
     const changed = applyAction(slot.rt, action);
     if (!changed) return;
@@ -334,6 +410,7 @@ class ChatStore {
     applyAction(slot.rt, { type: 'clear' });
     slot.oldestCursor = null;
     slot.hasOlder = false;
+    slot.usage = EMPTY_USAGE;
     slot.snap = null;
     this.unreadDirty = true;
     void this.persistence?.clear(workspaceId).catch(() => {});
@@ -356,6 +433,7 @@ class ChatStore {
         loaded: false,
         loadingInitial: false,
         loadingOlder: false,
+        usage: EMPTY_USAGE,
       };
       this.slots.set(workspaceId, slot);
     }
