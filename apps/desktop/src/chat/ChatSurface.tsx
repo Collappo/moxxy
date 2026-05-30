@@ -133,21 +133,29 @@ export function ChatSurface({
         canRename={activeDesk !== undefined}
         onRename={() => setRenameOpen(true)}
       />
-      {chat.loading ? (
-        <ChatLoading />
-      ) : chat.isEmpty ? (
-        <EmptyState ready={ready} />
-      ) : (
-        <Transcript
-          events={filteredEvents}
-          extensions={searchQuery ? EMPTY_EXTENSIONS : chat.extensions}
-          streamingText={searchQuery ? '' : chat.streamingText}
-          sending={chat.sending}
-          workspaceId={workspaceId}
-          hasOlder={!searchQuery && chat.hasOlder}
-          onReachedTop={chat.loadOlder}
-        />
-      )}
+      {/* Keyed by workspace so the message area cross-fades on switch
+       *  instead of snapping — masks the content swap flicker. */}
+      <div
+        key={workspaceId}
+        className="anim-fade-in"
+        style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}
+      >
+        {chat.loading ? (
+          <ChatLoading />
+        ) : chat.isEmpty ? (
+          <EmptyState ready={ready} />
+        ) : (
+          <Transcript
+            events={filteredEvents}
+            extensions={searchQuery ? EMPTY_EXTENSIONS : chat.extensions}
+            streamingText={searchQuery ? '' : chat.streamingText}
+            sending={chat.sending}
+            workspaceId={workspaceId}
+            hasOlder={!searchQuery && chat.hasOlder}
+            onReachedTop={chat.loadOlder}
+          />
+        )}
+      </div>
       {ready && !chat.sending && !chat.isEmpty && (
         <SuggestedActions
           suggestions={deriveSuggestions(chat.events)}

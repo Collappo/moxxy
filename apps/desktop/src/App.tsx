@@ -75,8 +75,13 @@ export function App(): JSX.Element {
   }
 
   // Hold the splash until we have a connection snapshot for some
-  // workspace AND we know who the active one is.
-  if (activeWorkspaceId === null || !snapshot) {
+  // workspace AND we know who the active one is — but ONLY on the very
+  // first boot. Once we've connected at least once (`lastConnected` set),
+  // a workspace switch can briefly leave `snapshot` undefined; dropping to
+  // the full-screen Splash there is exactly the flicker the user saw. Keep
+  // the shell mounted instead and fall back to `lastConnected` for the
+  // chrome phase (see `shellPhase` below).
+  if (activeWorkspaceId === null || (!snapshot && !lastConnected)) {
     return (
       <>
         <ConnectionBridge />

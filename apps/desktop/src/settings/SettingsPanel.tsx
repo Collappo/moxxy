@@ -239,23 +239,75 @@ function VaultTab({
       {vault.length === 0 ? (
         <EmptyState icon="lock" text="The vault is empty." />
       ) : (
-        <CardList>
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))',
+            gap: 10,
+          }}
+        >
           {vault.map((v) => (
-            <Row
-              key={v.name}
-              mono
-              tile={
-                <Tile bg="rgba(148, 163, 184, 0.18)" fg="var(--color-text-muted)">
-                  <Icon name="lock" size={16} />
-                </Tile>
-              }
-              title={v.name}
-              trailing={<Badge>Encrypted</Badge>}
-            />
+            <VaultKeyCard key={v.name} name={v.name} />
           ))}
-        </CardList>
+        </div>
       )}
     </Section>
+  );
+}
+
+/** Password-manager-style credential tile: a key glyph, the secret name,
+ *  and a masked value — distinct from the provider/MCP row list so the
+ *  vault reads as "stored secrets," not "things to toggle." */
+function VaultKeyCard({ name }: { readonly name: string }): JSX.Element {
+  return (
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 12,
+        padding: '14px 15px',
+        background: 'var(--color-card-bg)',
+        border: '1px solid var(--color-card-border)',
+        borderRadius: 14,
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+        <Tile bg="rgba(148, 163, 184, 0.16)" fg="var(--color-text-muted)">
+          <Icon name="lock" size={15} />
+        </Tile>
+        <span
+          className="mono"
+          title={name}
+          style={{
+            flex: 1,
+            minWidth: 0,
+            fontSize: 12.5,
+            fontWeight: 600,
+            color: 'var(--color-text)',
+            whiteSpace: 'nowrap',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+          }}
+        >
+          {name}
+        </span>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+        <span
+          aria-label="hidden value"
+          style={{
+            letterSpacing: '0.22em',
+            fontSize: 15,
+            lineHeight: 1,
+            color: 'var(--color-text-dim)',
+            userSelect: 'none',
+          }}
+        >
+          ••••••••
+        </span>
+        <Badge>Encrypted</Badge>
+      </div>
+    </div>
   );
 }
 
