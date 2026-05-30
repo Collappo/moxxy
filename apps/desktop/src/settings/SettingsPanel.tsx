@@ -136,17 +136,26 @@ export function SettingsPanel(): JSX.Element {
         </div>
       ) : (
         <>
-          {tab !== 'skills' && (
-            <SearchBox
-              value={query}
-              onChange={setQuery}
-              placeholder={`Search ${tab === 'mcp' ? 'MCP servers' : tab}…`}
+          {tab === 'providers' && (
+            <ProvidersTab
+              providers={providers}
+              search={<SearchBox value={query} onChange={setQuery} placeholder="Search providers…" />}
             />
           )}
-          {tab === 'providers' && <ProvidersTab providers={providers} />}
-          {tab === 'mcp' && <McpTab servers={mcp} onToggle={s.toggleMcp} />}
+          {tab === 'mcp' && (
+            <McpTab
+              servers={mcp}
+              onToggle={s.toggleMcp}
+              search={<SearchBox value={query} onChange={setQuery} placeholder="Search MCP servers…" />}
+            />
+          )}
           {tab === 'skills' && <SkillsView s={s} />}
-          {tab === 'vault' && <VaultTab vault={vault} />}
+          {tab === 'vault' && (
+            <VaultTab
+              vault={vault}
+              search={<SearchBox value={query} onChange={setQuery} placeholder="Search vault…" />}
+            />
+          )}
         </>
       )}
     </main>
@@ -157,14 +166,17 @@ export function SettingsPanel(): JSX.Element {
 
 function ProvidersTab({
   providers,
+  search,
 }: {
   readonly providers: ReturnType<typeof useSettings>['providers'];
+  readonly search?: React.ReactNode;
 }): JSX.Element {
   return (
     <Section
       title="Providers"
       count={providers.length}
       description="Model providers the runner can route to. Add a provider's key in the vault to activate it."
+      search={search}
     >
       {providers.length === 0 ? (
         <EmptyState icon="spark" text="No providers known to the connected runner." />
@@ -195,15 +207,18 @@ function ProvidersTab({
 function McpTab({
   servers,
   onToggle,
+  search,
 }: {
   readonly servers: ReadonlyArray<{ name: string; enabled: boolean; connected: boolean }>;
   readonly onToggle: (name: string, enabled: boolean) => Promise<void>;
+  readonly search?: React.ReactNode;
 }): JSX.Element {
   return (
     <Section
       title="MCP servers"
       count={servers.length}
       description="Model Context Protocol servers. Toggle one on to attach its tools to the agent."
+      search={search}
     >
       {servers.length === 0 ? (
         <EmptyState icon="plug" text="No MCP servers configured." />
@@ -247,14 +262,17 @@ function McpTab({
 
 function VaultTab({
   vault,
+  search,
 }: {
   readonly vault: ReadonlyArray<{ name: string }>;
+  readonly search?: React.ReactNode;
 }): JSX.Element {
   return (
     <Section
       title="Vault"
       count={vault.length}
       description="Secrets stored by the moxxy CLI. Names only — values are encrypted at rest and never leave the host."
+      search={search}
     >
       {vault.length === 0 ? (
         <EmptyState icon="lock" text="The vault is empty." />
@@ -378,11 +396,13 @@ function Section({
   title,
   count,
   description,
+  search,
   children,
 }: {
   readonly title: string;
   readonly count?: number;
   readonly description?: string;
+  readonly search?: React.ReactNode;
   readonly children: React.ReactNode;
 }): JSX.Element {
   return (
@@ -413,6 +433,7 @@ function Section({
           </p>
         )}
       </div>
+      {search}
       {children}
     </section>
   );
