@@ -52,6 +52,10 @@ export default defineConfig({
       rollupOptions: {
         input: { index: path.resolve('electron/preload/index.ts') },
         external: EXTERNAL_NATIVE,
+        // A `sandbox: true` window loads its preload as a classic
+        // CommonJS script — an ESM (.mjs) preload throws "Cannot use
+        // import statement outside a module" and never runs. Emit CJS.
+        output: { format: 'cjs', entryFileNames: 'index.cjs' },
       },
     },
   },

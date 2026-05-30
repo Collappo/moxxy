@@ -72,7 +72,7 @@ async function createWindow(): Promise<void> {
     autoHideMenuBar: true,
     icon: iconPath,
     webPreferences: {
-      preload: path.join(__dirname, '..', 'preload', 'index.mjs'),
+      preload: path.join(__dirname, '..', 'preload', 'index.cjs'),
       contextIsolation: true,
       // The preload bridge only touches ipcRenderer + contextBridge, so
       // the OS process sandbox is safe to enable — it shrinks the blast
@@ -140,7 +140,7 @@ async function createWindow(): Promise<void> {
   // window, surface the floating widget instead.
   const focusOpts = {
     devUrl: isDev ? process.env['ELECTRON_RENDERER_URL'] : undefined,
-    preloadPath: path.join(__dirname, '..', 'preload', 'index.mjs'),
+    preloadPath: path.join(__dirname, '..', 'preload', 'index.cjs'),
     indexHtml: path.join(__dirname, '..', '..', 'dist', 'index.html'),
     focusHtml: path.join(__dirname, '..', '..', 'dist', 'focus.html'),
     /** Bind the focus widget to the same runner pool as the main
