@@ -53,6 +53,9 @@ export interface ChatSnapshot {
   readonly isEmpty: boolean;
   /** More history exists on disk, fetchable via {@link ChatStore.loadOlder}. */
   readonly hasOlder: boolean;
+  /** First on-open disk read is still in flight and nothing has rendered
+   *  yet — the transcript shows an initial-loading spinner. */
+  readonly loading: boolean;
 }
 
 interface Slot {
@@ -66,6 +69,9 @@ interface Slot {
   hasOlder: boolean;
   /** Whether the initial window has been loaded from disk. */
   loaded: boolean;
+  /** True while the first on-open disk read is in flight (drives the
+   *  transcript's initial-loading spinner). */
+  loadingInitial: boolean;
   loadingOlder: boolean;
 }
 
@@ -84,6 +90,7 @@ export const EMPTY_SNAPSHOT: ChatSnapshot = Object.freeze({
   error: null,
   isEmpty: true,
   hasOlder: false,
+  loading: false,
 });
 
 class ChatStore {
@@ -139,6 +146,14 @@ class ChatStore {
       error: rt.error,
       isEmpty: events.length === 0 && rt.extensions.length === 0 && rt.streamingText === '',
       hasOlder: slot.hasOlder,
+      // Only "loading" while the first read is in flight AND nothing has
+      // rendered yet — a turn that raced ahead of the load shows the
+      // transcript, not the spinner.
+      loading:
+        slot.loadingInitial &&
+        events.length === 0 &&
+        rt.extensions.length === 0 &&
+        rt.streamingText === '',
     };
     return slot.snap;
   }
@@ -223,6 +238,9 @@ class ChatStore {
     const slot = this.ensure(workspaceId);
     if (slot.loaded || !this.persistence) return;
     slot.loaded = true; // set before await so concurrent calls bail
+    slot.loadingInitial = true; // show the spinner while the read is in flight
+    slot.snap = null;
+    this.emit();
     try {
       const { events, prevCursor } = await this.persistence.loadSegment(
         workspaceId,
@@ -232,10 +250,12 @@ class ChatStore {
       this.prependFresh(slot, events);
       slot.oldestCursor = prevCursor;
       slot.hasOlder = prevCursor !== null;
-      slot.snap = null;
-      this.emit();
     } catch {
       slot.loaded = false; // allow a retry on the next open
+    } finally {
+      slot.loadingInitial = false;
+      slot.snap = null;
+      this.emit();
     }
   }
 
@@ -334,6 +354,7 @@ class ChatStore {
         oldestCursor: null,
         hasOlder: false,
         loaded: false,
+        loadingInitial: false,
         loadingOlder: false,
       };
       this.slots.set(workspaceId, slot);

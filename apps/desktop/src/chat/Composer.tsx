@@ -11,6 +11,7 @@ import { useQueuedTurns } from '@/lib/useChat';
 import { useVoiceRecorder } from '@/lib/useVoiceRecorder';
 import { chatStore } from '@/lib/chatStore';
 import { AgentPicker } from './AgentPicker';
+import { ContextMeter } from './ContextMeter';
 import { CommandPalette } from './CommandPalette';
 import { FILE_INSERT_EVENT, type FileInsertDetail } from '@/shell/WorkspaceFiles';
 
@@ -263,6 +264,7 @@ export function Composer({
           </span>
         </ToolChip>
         <span style={{ flex: 1 }} />
+        <ContextMeter workspaceId={workspaceId} />
         {inFlight ? (
           <button
             type="button"

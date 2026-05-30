@@ -105,16 +105,21 @@ function ProvidersTab({
 }: {
   readonly providers: ReturnType<typeof useSettings>['providers'];
 }): JSX.Element {
+  if (providers.length === 0) {
+    return <EmptyNote>No providers known to the connected runner.</EmptyNote>;
+  }
   return (
-    <List
-      empty="No providers known to the connected runner."
-      rows={providers.map((p) => ({
-        key: p.name,
-        title: p.name,
-        subtitle: p.ready ? 'ready' : 'not ready',
-        accent: p.ready ? 'var(--color-green)' : 'var(--color-text-dim)',
-      }))}
-    />
+    <CardList>
+      {providers.map((p) => (
+        <RowCard
+          key={p.name}
+          title={p.name}
+          badge={
+            <Badge tone={p.ready ? 'ok' : 'muted'}>{p.ready ? 'Ready' : 'Not ready'}</Badge>
+          }
+        />
+      ))}
+    </CardList>
   );
 }
 
@@ -126,45 +131,25 @@ function McpTab({
   readonly onToggle: (name: string, enabled: boolean) => Promise<void>;
 }): JSX.Element {
   if (servers.length === 0) {
-    return <p style={{ color: 'var(--color-text-dim)' }}>No MCP servers configured.</p>;
+    return <EmptyNote>No MCP servers configured.</EmptyNote>;
   }
   return (
-    <ul role="list" style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+    <CardList>
       {servers.map((srv) => (
-        <li
+        <RowCard
           key={srv.name}
-          data-testid={`mcp-row-${srv.name}`}
-          style={{
-            padding: '0.55rem 0.75rem',
-            background: 'var(--color-bg-card)',
-            border: '1px solid var(--color-border)',
-            borderRadius: 'var(--radius-block)',
-            display: 'grid',
-            gridTemplateColumns: '1fr auto auto',
-            gap: '0.5rem',
-            alignItems: 'center',
-          }}
-        >
-          <div>
-            <div style={{ fontWeight: 600, fontSize: '0.9rem' }}>{srv.name}</div>
-            <div
-              className="mono"
-              style={{ fontSize: '0.7rem', color: 'var(--color-text-dim)' }}
-            >
-              {srv.enabled ? 'enabled' : 'disabled'} · {srv.connected ? 'connected' : 'detached'}
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={() => void onToggle(srv.name, !srv.enabled)}
-            style={pill(srv.enabled ? 'var(--color-green)' : 'var(--color-text-dim)')}
-          >
-            {srv.enabled ? 'disable' : 'enable'}
-          </button>
-          <span />
-        </li>
+          testId={`mcp-row-${srv.name}`}
+          title={srv.name}
+          subtitle={`${srv.enabled ? 'enabled' : 'disabled'} · ${srv.connected ? 'connected' : 'detached'}`}
+          badge={
+            srv.connected ? <Badge tone="ok">Connected</Badge> : <Badge tone="muted">Detached</Badge>
+          }
+          action={
+            <ToggleButton enabled={srv.enabled} onClick={() => void onToggle(srv.name, !srv.enabled)} />
+          }
+        />
       ))}
-    </ul>
+    </CardList>
   );
 }
 
@@ -175,78 +160,144 @@ function VaultTab({
 }): JSX.Element {
   return (
     <>
-      <p style={{ color: 'var(--color-text-dim)', fontSize: '0.85rem', margin: 0 }}>
-        Vault entries (names only — encrypted at rest by the moxxy CLI).
-      </p>
-      <List
-        empty="Vault is empty."
-        rows={vault.map((v) => ({
-          key: v.name,
-          title: v.name,
-          subtitle: 'encrypted',
-          accent: 'var(--color-text-dim)',
-        }))}
-      />
+      <EmptyNote>Vault entries — names only; values are encrypted at rest by the moxxy CLI.</EmptyNote>
+      {vault.length > 0 && (
+        <CardList>
+          {vault.map((v) => (
+            <RowCard key={v.name} title={v.name} mono badge={<Badge tone="muted">Encrypted</Badge>} />
+          ))}
+        </CardList>
+      )}
     </>
   );
 }
 
-function List({
-  rows,
-  empty,
-}: {
-  readonly rows: ReadonlyArray<{ key: string; title: string; subtitle: string; accent: string }>;
-  readonly empty: string;
-}): JSX.Element {
-  if (rows.length === 0) {
-    return <p style={{ color: 'var(--color-text-dim)' }}>{empty}</p>;
-  }
+// ---- shared card primitives ----------------------------------------------
+
+function CardList({ children }: { readonly children: React.ReactNode }): JSX.Element {
   return (
-    <ul role="list" style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-      {rows.map((r) => (
-        <li
-          key={r.key}
-          style={{
-            padding: '0.55rem 0.75rem',
-            background: 'var(--color-bg-card)',
-            border: '1px solid var(--color-border)',
-            borderRadius: 'var(--radius-block)',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '0.6rem',
-          }}
-        >
-          <span
-            aria-hidden
-            style={{
-              width: 8,
-              height: 8,
-              borderRadius: '50%',
-              background: r.accent,
-            }}
-          />
-          <div style={{ flex: 1 }}>
-            <div style={{ fontSize: '0.9rem', fontWeight: 600 }}>{r.title}</div>
-            <div
-              className="mono"
-              style={{ fontSize: '0.7rem', color: 'var(--color-text-dim)' }}
-            >
-              {r.subtitle}
-            </div>
-          </div>
-        </li>
-      ))}
+    <ul
+      role="list"
+      style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 8 }}
+    >
+      {children}
     </ul>
   );
 }
 
-function pill(bg: string): React.CSSProperties {
-  return {
-    fontSize: '0.75rem',
-    padding: '0.3rem 0.7rem',
-    color: 'var(--color-bg)',
-    background: bg,
-    borderRadius: 'var(--radius-block)',
-    fontWeight: 600,
+function RowCard({
+  title,
+  subtitle,
+  badge,
+  action,
+  mono,
+  testId,
+}: {
+  readonly title: string;
+  readonly subtitle?: string;
+  readonly badge?: React.ReactNode;
+  readonly action?: React.ReactNode;
+  readonly mono?: boolean;
+  readonly testId?: string;
+}): JSX.Element {
+  return (
+    <li
+      {...(testId ? { 'data-testid': testId } : {})}
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 12,
+        padding: '12px 14px',
+        background: 'var(--color-card-bg)',
+        border: '1px solid var(--color-card-border)',
+        borderRadius: 12,
+      }}
+    >
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div
+          className={mono ? 'mono' : undefined}
+          style={{
+            fontSize: 13.5,
+            fontWeight: 600,
+            color: 'var(--color-text)',
+            whiteSpace: 'nowrap',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+          }}
+        >
+          {title}
+        </div>
+        {subtitle && (
+          <div className="mono" style={{ fontSize: 11, color: 'var(--color-text-dim)', marginTop: 2 }}>
+            {subtitle}
+          </div>
+        )}
+      </div>
+      {badge}
+      {action}
+    </li>
+  );
+}
+
+type BadgeTone = 'ok' | 'muted' | 'warn' | 'error';
+
+function Badge({ tone, children }: { readonly tone: BadgeTone; readonly children: React.ReactNode }): JSX.Element {
+  const palette: Record<BadgeTone, { bg: string; fg: string }> = {
+    ok: { bg: '#ecfdf5', fg: 'var(--color-green)' },
+    muted: { bg: 'rgba(148, 163, 184, 0.16)', fg: 'var(--color-text-muted)' },
+    warn: { bg: '#fffbeb', fg: 'var(--color-amber)' },
+    error: { bg: '#fef2f2', fg: 'var(--color-red)' },
   };
+  const c = palette[tone];
+  return (
+    <span
+      style={{
+        flexShrink: 0,
+        fontSize: 10.5,
+        fontWeight: 700,
+        textTransform: 'uppercase',
+        letterSpacing: '0.04em',
+        padding: '3px 9px',
+        borderRadius: 999,
+        background: c.bg,
+        color: c.fg,
+      }}
+    >
+      {children}
+    </span>
+  );
+}
+
+function ToggleButton({
+  enabled,
+  onClick,
+}: {
+  readonly enabled: boolean;
+  readonly onClick: () => void;
+}): JSX.Element {
+  return (
+    <button
+      type="button"
+      className="btn-chip"
+      onClick={onClick}
+      style={{
+        flexShrink: 0,
+        fontSize: 12,
+        fontWeight: 600,
+        padding: '5px 12px',
+        borderRadius: 999,
+        border: enabled ? '1px solid transparent' : '1px solid var(--color-card-border)',
+        background: enabled ? 'var(--color-primary-soft)' : '#fff',
+        color: enabled ? 'var(--color-primary-strong)' : 'var(--color-text-muted)',
+      }}
+    >
+      {enabled ? 'Disable' : 'Enable'}
+    </button>
+  );
+}
+
+function EmptyNote({ children }: { readonly children: React.ReactNode }): JSX.Element {
+  return (
+    <p style={{ margin: 0, fontSize: 13, color: 'var(--color-text-dim)', lineHeight: 1.6 }}>{children}</p>
+  );
 }

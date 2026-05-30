@@ -145,8 +145,12 @@ export function WorkspaceSidebar({ view, onView }: Props): JSX.Element {
           </span>
           {busy ? 'Picking folder…' : 'New workspace'}
         </button>
-
-        <SectionHeader title="Menu" style={{ marginTop: 20 }} />
+      </div>
+      {/* Menu is anchored to the bottom — Chat / Workflows / Settings sit
+       *  just above the profile's top border, not buried at the top of the
+       *  scrolling workspace list. */}
+      <nav style={{ padding: '6px 12px 10px' }}>
+        <SectionHeader title="Menu" />
         <ul role="list" style={listReset}>
           {MENU_ITEMS.map((m) => (
             <li key={m.id}>
@@ -188,7 +192,7 @@ export function WorkspaceSidebar({ view, onView }: Props): JSX.Element {
             </li>
           ))}
         </ul>
-      </div>
+      </nav>
       <ProfilePill />
       {pendingFolder && (
         <NameWorkspaceModal

@@ -20,6 +20,8 @@ export interface UseChat {
   readonly activeTurnId: string | null;
   readonly error: string | null;
   readonly isEmpty: boolean;
+  /** First on-open disk read is still loading; show a transcript spinner. */
+  readonly loading: boolean;
   readonly send: (
     prompt: string,
     attachments?: ReadonlyArray<{ path: string; name: string }>,
@@ -172,6 +174,7 @@ export function useChat(workspaceId: string | null): UseChat {
     activeTurnId: snap.activeTurnId,
     error: snap.error,
     isEmpty: snap.isEmpty,
+    loading: snap.loading,
     send,
     abort,
     clear,

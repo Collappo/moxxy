@@ -176,7 +176,9 @@ export function SkillsView({
 
       <article
         style={{
-          background: 'var(--color-card-bg)',
+          // Match the chat surface background so the skill body reads as
+          // the same "writing surface" as a conversation.
+          background: 'rgb(252, 252, 255)',
           border: '1px solid var(--color-card-border)',
           borderRadius: 12,
           overflow: 'hidden',
@@ -287,7 +289,7 @@ export function SkillsView({
                 fontSize: 13,
                 lineHeight: 1.55,
                 fontFamily: 'var(--font-mono)',
-                background: '#fbfcff',
+                background: 'transparent',
                 color: 'var(--color-text)',
                 border: 'none',
                 outline: 'none',

@@ -20,6 +20,7 @@ type IconName =
   | 'copy'
   | 'thumbs-up'
   | 'thumbs-down'
+  | 'speaker'
   | 'more'
   | 'chevron-right'
   | 'spark'
@@ -116,6 +117,13 @@ const paths: Record<IconName, JSX.Element> = {
       <path d="M17 13h3a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2h-3" />
       <path d="M17 13H7a3 3 0 0 1-3-3l1-5a3 3 0 0 1 3-2.5h9" />
       <path d="M11 13v5a3 3 0 0 0 3 3l3-8" />
+    </>
+  ),
+  speaker: (
+    <>
+      <path d="M11 4.7a.7.7 0 0 0-1.2-.5L6.4 7.6A1.4 1.4 0 0 1 5.4 8H3a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2.4a1.4 1.4 0 0 1 1 .4l3.4 3.4a.7.7 0 0 0 1.2-.5z" />
+      <path d="M16 9a5 5 0 0 1 0 6" />
+      <path d="M19.4 5.6a9 9 0 0 1 0 12.7" />
     </>
   ),
   more: (
