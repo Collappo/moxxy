@@ -306,6 +306,7 @@ function SkillGallery({
     : skills;
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
         <h2 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>Skills</h2>
         <span
@@ -362,6 +363,11 @@ function SkillGallery({
           <Icon name="plus" size={14} />
           New skill
         </button>
+      </div>
+        <p style={{ margin: '4px 0 0', fontSize: 12.5, color: 'var(--color-text-dim)', lineHeight: 1.5 }}>
+          Reusable instructions the agent loads when your message matches a skill&apos;s triggers. Create
+          one, or generate it with AI.
+        </p>
       </div>
 
       {skills.length > 0 && (
@@ -422,13 +428,24 @@ function SkillGallery({
                 gap: 10,
                 padding: 16,
                 minWidth: 0,
+                maxWidth: '100%',
+                overflow: 'hidden',
                 minHeight: 104,
                 background: 'var(--color-card-bg)',
                 border: '1px solid var(--color-card-border)',
                 borderRadius: 14,
               }}
             >
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 10,
+                  minWidth: 0,
+                  width: '100%',
+                  overflow: 'hidden',
+                }}
+              >
                 <span
                   aria-hidden
                   style={{
