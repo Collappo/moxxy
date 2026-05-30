@@ -151,6 +151,7 @@ export {
   createCallbackResolver,
   createAllowListResolver,
   createDeferredPermissionResolver,
+  evaluateToolRule,
   type CallbackResolverOptions,
   type PermissionPromptHandler,
   type DeferredPermissionResolver,
