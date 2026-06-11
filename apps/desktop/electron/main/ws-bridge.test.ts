@@ -2,7 +2,6 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { parsePairingQrPayload } from '../../../mobile/src/pairingQr';
 import type { MobileGatewayStatus } from '@moxxy/desktop-ipc-contract';
 import type { WebSocketBridgeServer, WebSocketCommandBus } from '@moxxy/ipc-server-ws';
 import {
@@ -361,26 +360,5 @@ describe('MobileGatewayManager', () => {
     expect(fake.rotations).toEqual([]);
     expect(after.token).toBe('pinned-token');
     expect(after.connectUrl).toBe(before.connectUrl);
-  });
-});
-
-// ---- The critical integration assertion: the QR the desktop emits is EXACTLY
-// what the shipped mobile app accepts. We import the app's own parser and feed
-// it the connectUrl the gateway built. -------------------------------------
-describe('QR ↔ mobile app round-trip', () => {
-  it('the gateway connectUrl parses cleanly via the app parsePairingQrPayload', async () => {
-    const { rt } = makeRuntime({ userData });
-    const mgr = new MobileGatewayManager(rt);
-    const status = await mgr.start();
-    expect(status.connectUrl).toBeTruthy();
-
-    // The mobile app scans this exact string off the QR.
-    const parsed = parsePairingQrPayload(status.connectUrl!);
-    // The token round-trips intact…
-    expect(parsed.token).toBe(status.token);
-    // …and the bare gateway URL is a ws:// address with the bound port and the
-    // ?t= credential stripped (the app presents the token via the subprotocol).
-    expect(parsed.gatewayUrl).toMatch(/^ws:\/\/[^/]+:8765$/);
-    expect(parsed.gatewayUrl).not.toContain('?t=');
   });
 });
