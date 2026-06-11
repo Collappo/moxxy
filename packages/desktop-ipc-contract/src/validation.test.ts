@@ -77,6 +77,31 @@ describe('IPC payload validation', () => {
     ).toThrow();
   });
 
+  it('bounds sessions.create / rename names like desks.create / rename', () => {
+    expect(() => validateIpcInput('sessions.create', undefined)).not.toThrow();
+    expect(() => validateIpcInput('sessions.create', {})).not.toThrow();
+    expect(() =>
+      validateIpcInput('sessions.create', { deskId: 'd1', name: 'Research' }),
+    ).not.toThrow();
+    expect(() => validateIpcInput('sessions.create', { name: '' })).toThrow();
+    expect(() => validateIpcInput('sessions.create', { name: 'x'.repeat(201) })).toThrow();
+    expect(() =>
+      validateIpcInput('sessions.rename', { id: 's1', name: 'New name' }),
+    ).not.toThrow();
+    expect(() => validateIpcInput('sessions.rename', { id: 's1', name: '' })).toThrow();
+    expect(() =>
+      validateIpcInput('sessions.rename', { id: 's1', name: 'x'.repeat(201) }),
+    ).toThrow();
+  });
+
+  it('requires bounded ids for sessions.setActive / remove', () => {
+    expect(() => validateIpcInput('sessions.setActive', { id: 's1' })).not.toThrow();
+    expect(() => validateIpcInput('sessions.setActive', { id: '' })).toThrow();
+    expect(() => validateIpcInput('sessions.setActive', {})).toThrow();
+    expect(() => validateIpcInput('sessions.remove', { id: 's1' })).not.toThrow();
+    expect(() => validateIpcInput('sessions.remove', { id: 'x'.repeat(257) })).toThrow();
+  });
+
   it('requires a boolean for setAutoApprove', () => {
     expect(() =>
       validateIpcInput('session.setAutoApprove', { workspaceId: 'ws', enabled: true }),
@@ -105,6 +130,14 @@ describe('IPC payload validation', () => {
   it('allows mobileGatewayEnabled in prefs.update', () => {
     expect(() => validateIpcInput('prefs.update', { mobileGatewayEnabled: true })).not.toThrow();
     expect(() => validateIpcInput('prefs.update', { mobileGatewayEnabled: 'x' })).toThrow();
+  });
+
+  it('whitelists theme in prefs.update to the three known values', () => {
+    expect(() => validateIpcInput('prefs.update', { theme: 'light' })).not.toThrow();
+    expect(() => validateIpcInput('prefs.update', { theme: 'dark' })).not.toThrow();
+    expect(() => validateIpcInput('prefs.update', { theme: 'system' })).not.toThrow();
+    expect(() => validateIpcInput('prefs.update', { theme: 'hotdog' })).toThrow();
+    expect(() => validateIpcInput('prefs.update', { theme: true })).toThrow();
   });
 
   it('is a no-op for commands without a schema', () => {

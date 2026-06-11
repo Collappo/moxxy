@@ -208,6 +208,9 @@ export interface NodeProbe {
 
 // ---------- Desktop preferences (first-run + auth state) -------------------
 
+/** The user's color-scheme choice. `system` follows the OS (the default). */
+export type ThemePreference = 'light' | 'dark' | 'system';
+
 export interface DesktopPrefs {
   onboardingComplete: boolean;
   clerkUserId: string | null;
@@ -218,6 +221,11 @@ export interface DesktopPrefs {
    *  survives a restart. Defaults to false (OFF) — exposing the host on the LAN
    *  is always an explicit opt-in. */
   mobileGatewayEnabled: boolean;
+  /** Color scheme. The renderer's useTheme() controller maps it to
+   *  `data-theme="dark"` on <html>; the main process mirrors it into
+   *  `nativeTheme.themeSource` so window chrome / prefers-color-scheme agree.
+   *  Defaults to `system`. */
+  theme: ThemePreference;
   version: 1;
 }
 
@@ -326,17 +334,40 @@ export interface SkillFile {
 
 // ---------- Desks ---------------------------------------------------------
 
+/** One conversation under a desk. Each session is backed by its own
+ *  runner process (the pool keys supervisors by session id) with its
+ *  own sticky runner log (`~/.moxxy/sessions/<id>.jsonl`) and chat
+ *  NDJSON mirror — switching sessions never tears the others down. */
+export interface DeskSession {
+  id: string;
+  name: string;
+  createdAt: number;
+}
+
 export interface Desk {
   id: string;
   name: string;
   cwd: string;
   color: string;
   createdAt: number;
+  /** Every conversation under this desk. A desk always has >= 1 session;
+   *  the default first session's id equals the desk id (the v1 migration
+   *  invariant that keeps pre-multi-session runner logs + chat mirrors
+   *  resuming untouched). */
+  sessions: DeskSession[];
+  /** The session the desk foregrounds when it becomes active. */
+  activeSessionId: string;
 }
 
 export interface DesksOverview {
   desks: Desk[];
   activeId: string | null;
+}
+
+/** `sessions.list` result — one desk's sessions + which one is active. */
+export interface SessionsOverview {
+  sessions: DeskSession[];
+  activeSessionId: string | null;
 }
 
 // ---------- Chat -----------------------------------------------------------
@@ -387,6 +418,10 @@ export interface AppUpdateCheck {
   latestVersion: string | null;
   /** False ⇒ the update needs a newer shell (a Tier-2 / installer update). */
   compatible: boolean;
+  /** True ⇒ the published bundle's runner protocol outruns the CLI this
+   *  install can spawn: a hot-update would be staged but refused at every boot
+   *  (`runner-protocol-skew`), so the update needs the full app installer. */
+  requiresFullUpdate?: boolean;
   notes?: string;
   releaseUrl?: string;
   /** Set when the check itself failed (offline, not configured, …). */
@@ -535,8 +570,15 @@ export interface IpcCommands {
    *  the writable userData copy, streaming `app.update.progress`. On success
    *  the new bundle activates on the next launch (the UI offers a relaunch).
    *  The update SOURCE is resolved entirely main-side — the renderer passes no
-   *  URL. */
-  'app.updateDashboard': () => Promise<{ ok: boolean; version: string | null; error?: string }>;
+   *  URL. `requiresFullUpdate` ⇒ the bundle was deliberately NOT staged: its
+   *  runner protocol outruns the spawnable CLI, so only the full app installer
+   *  (Tier-2) can deliver it. */
+  'app.updateDashboard': () => Promise<{
+    ok: boolean;
+    version: string | null;
+    error?: string;
+    requiresFullUpdate?: boolean;
+  }>;
   /** Relaunch the app so a freshly-installed dashboard bundle takes effect. */
   'app.relaunch': () => Promise<void>;
   /** Renderer → main heartbeat: the React tree mounted past the splash. Clears
@@ -585,6 +627,25 @@ export interface IpcCommands {
   /** Open a native folder picker; resolves to the absolute path or null
    *  if the user cancelled. */
   'desks.pickFolder': () => Promise<string | null>;
+
+  // ---- Sessions (multiple conversations per desk) ------------------------
+  /** List a desk's sessions (defaults to the active desk). */
+  'sessions.list': (args?: { deskId?: string }) => Promise<SessionsOverview>;
+  /** Create a NEW session under a desk (defaults to the active desk) and
+   *  spawn its runner. Unlike `session.newSession` (which destructively
+   *  resets the CURRENT session in place), this adds another concurrent
+   *  conversation. Name defaults to "Session N". Does not change the
+   *  active session — call `sessions.setActive` to foreground it. */
+  'sessions.create': (args?: { deskId?: string; name?: string }) => Promise<DeskSession>;
+  /** Foreground a session: persists it as its desk's active session (and
+   *  that desk as the active desk), spawns its runner if needed, and
+   *  points the pool at it. */
+  'sessions.setActive': (args: { id: string }) => Promise<void>;
+  /** Delete a session: stop its runner, delete its persisted runner log
+   *  and chat transcript. A desk always keeps >= 1 session — removing the
+   *  last one seeds a fresh empty session in its place. */
+  'sessions.remove': (args: { id: string }) => Promise<void>;
+  'sessions.rename': (args: { id: string; name: string }) => Promise<DeskSession>;
 
   /** Returns the runner's SessionInfo snapshot for the workspace.
    *  Defaults to the active workspace. */
@@ -851,6 +912,17 @@ export const REMOTE_ALLOWED_COMMANDS: ReadonlySet<IpcCommandName> = new Set<IpcC
   'session.setMode',
   'session.newSession',
   'session.runCommand',
+  // Multi-session conversations: list/create/switch/rename are conversation-
+  // scoped — the same trust class as `session.newSession` (already allowed),
+  // and what a paired phone needs to mirror the desktop's session list.
+  // `sessions.remove` is deliberately NOT here: it deletes on-disk state
+  // (the runner's session JSONL + the chat NDJSON transcript), a destructive
+  // host mutation in the same class as `desks.remove`, which is also
+  // host-only.
+  'sessions.list',
+  'sessions.create',
+  'sessions.setActive',
+  'sessions.rename',
   // Voice input (capability-probed; transcribe fails coded without a transcriber).
   'session.hasTranscriber',
   'session.transcribe',

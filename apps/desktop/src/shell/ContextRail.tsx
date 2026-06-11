@@ -13,7 +13,7 @@
  */
 
 import { useState } from 'react';
-import { useDesks } from '@moxxy/client-core';
+import { deskForWorkspace, useDesks } from '@moxxy/client-core';
 import { Icon } from '@moxxy/desktop-ui';
 import { WorkspaceFiles } from './WorkspaceFiles';
 
@@ -34,7 +34,8 @@ interface Props {
 
 export function ContextRail({ onClose, open, workspaceId }: Props): JSX.Element {
   const desks = useDesks();
-  const active = desks.desks.find((d) => d.id === workspaceId);
+  // workspaceId is a SESSION id — resolve the desk that owns it.
+  const active = deskForWorkspace(desks.desks, workspaceId);
   // Bumping this re-reads the file tree (the button next to the FILES heading).
   const [filesReload, setFilesReload] = useState(0);
 
@@ -229,7 +230,7 @@ function Path({ text }: { readonly text: string }): JSX.Element {
       style={{
         fontSize: 11.5,
         color: 'var(--color-text-muted)',
-        background: '#f7f8fc',
+        background: 'var(--color-input-soft)',
         padding: '8px 10px',
         borderRadius: 8,
         border: '1px solid var(--color-card-border)',
@@ -278,5 +279,5 @@ const iconBtnStyle: React.CSSProperties = {
   alignItems: 'center',
   justifyContent: 'center',
   border: '1px solid var(--color-card-border)',
-  background: '#fff',
+  background: 'var(--color-surface)',
 };
