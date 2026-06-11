@@ -372,7 +372,6 @@ Provider keys (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, …) are picked up automat
 @moxxy/testing                      ← FakeProvider + record/replay harness
 @moxxy/chat-model                   ← UI-neutral chat model (event→block fold + markdown AST + chunked log); shared by the TUI and desktop
 apps/desktop                        ← Electron desktop app (attaches to @moxxy/runner)
-apps/mobile                         ← Expo (React Native) PoC: the shared client layer over the desktop's WebSocket bridge
 @moxxy/desktop-ipc-contract         ← typed desktop IPC boundary (channels + payloads + Zod validation + error envelope)
 @moxxy/desktop-host                 ← desktop Electron main process (runner pool/supervisor, IPC, NDJSON chat log, security)
 @moxxy/desktop-ui                   ← framework-light React UI primitives (Icon set, Modal, Skeleton); shared by the renderer

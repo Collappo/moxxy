@@ -177,11 +177,6 @@ Full report incl. the medium/low backlog and refuted findings:
   time), blocks dependents of a failed publish, and a post-publish `npm view` check
   verifies every shipped `@moxxy/*` pin exists on the registry (loud + exit 1 otherwise);
   helpers unit-tested via `pnpm test:scripts`.
-- **A13 [high, PoC-scoped] default `moxxy mobile` prints an unconnectable QR** — ✅ FIXED
-  (this PR): the QR now advertises exactly what is bound (loopback default →
-  `ws://127.0.0.1` + a printed hint that a real phone needs `MOXXY_MOBILE_HOST`/`bindHost`
-  opt-in or a tunnel; wildcard bind → LAN IP; tunnel path unchanged), keeping the
-  loopback-by-default security posture; `apps/mobile/README.md` updated to match.
 - **A14 [medium, stability] Corrupt/schema-mismatched `webhooks.json` silently treated as
   empty — the next write wipes every trigger (and its secrets)** — ✅ FIXED (this PR):
   fail-safe load in `plugin-webhooks/src/store.ts` — a corrupt file is renamed aside to

@@ -68,7 +68,6 @@ apps/desktop                 Electron desktop app — attaches to @moxxy/runner,
 @moxxy/client-transport-ws   MoxxyApi (invoke/subscribe) over a WebSocket JSON-RPC client for remote clients (uses the global WebSocket — Metro/RN-safe)
 @moxxy/ipc-server-ws         serves the desktop IPC contract over an authenticated WebSocket (WebSocketCommandBus; bearer-token handshake; Node-only)
 @moxxy/design-tokens         framework-neutral design tokens (colors/fonts/radii/shadows) + :root CSS-variable generator; consumed by the desktop renderer and React Native
-apps/mobile                  Expo (React Native) PoC driving the chat loop through @moxxy/client-core over the desktop host's WebSocket bridge
 ```
 
 **State model.** Every interaction appends to an immutable event log; derived state is a pure fold. Any session can be replayed from its log.
