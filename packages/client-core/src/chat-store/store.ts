@@ -16,8 +16,90 @@
  */
 
 import type { MoxxyEvent } from '@moxxy/sdk';
-import { applyAction, type ChatAction } from '../chatModel.js';
+import { applyAction, isRenderedEvent, type ChatAction } from '../chatModel.js';
 import { INITIAL_WINDOW, OLDER_PAGE, type ChatPersistence } from '../chatPersistence.js';
+
+/**
+ * Runner-history paging (the `session.loadHistory` path). The runner's pages are
+ * RAW events — they include non-rendered events (assistant_chunk deltas,
+ * provider bookends) that the renderer filters out — so one page yields fewer
+ * RENDERED rows than its size. {@link ChatStore.loadRunnerWindow} therefore
+ * walks several raw pages until it has enough rendered rows.
+ */
+// Raw events fetched per `session.loadHistory` round-trip (well under the
+// runner's MAX_HISTORY_PAGE_LIMIT of 2000).
+const RUNNER_RAW_PAGE = 200;
+// Safety bound on the raw-page walk for ONE window: a window dominated by a long
+// streamed reply (hundreds of assistant_chunks) can't spin forever — after this
+// many pages we return what we have and let the next scroll-up continue.
+const MAX_RUNNER_PAGES = 25;
+
+/**
+ * Project a RAW runner window (all event types, ascending `seq`) into the
+ * rendered transcript the chat shows — the read-time equivalent of what the live
+ * reducer commits. Keeps {@link isRenderedEvent} events AND reconstructs the
+ * reply for a turn that streamed assistant text but ended UNSEALED (a fatal
+ * error / abort with no `assistant_message`).
+ *
+ * Why the synth: the runner seals such turns into a real `assistant_message`
+ * (`sealUnsealedStreamedText`) and the live renderer used to synthesize one on
+ * `turn_complete` — but a LEGACY runner log written BEFORE the seal feature
+ * holds chunks + the terminal error/abort and NO message, so filtering with
+ * `isRenderedEvent` alone would silently drop the reply text. We detect the
+ * unsealed turn by its TERMINAL fatal-error/abort row (NOT a turn boundary — a
+ * SEALED reply whose chunks merely span a window edge must not be re-synthesized)
+ * and emit the reconstructed reply right after it, matching the runner's own seq
+ * order. The accumulator resets on a sealing `assistant_message` or a fresh
+ * `provider_request` (a new iteration), so only the final iteration's unsealed
+ * text is reconstructed — identical to the runner's seal.
+ */
+export function projectRunnerWindow(raw: ReadonlyArray<MoxxyEvent>): MoxxyEvent[] {
+  // Turns that carry a REAL sealing assistant_message anywhere in this window
+  // must never be reconstructed — a POST-seal runner errored turn holds chunks,
+  // the error, AND the seal the runner appended at turn end, so synthesizing at
+  // the error would double the reply. Only a LEGACY (pre-seal) turn lacks the
+  // message and needs reconstruction.
+  const sealedTurns = new Set<string>();
+  for (const e of raw) if (e.type === 'assistant_message') sealedTurns.add(e.turnId);
+
+  const out: MoxxyEvent[] = [];
+  const unsealed = new Map<string, string>();
+  for (const e of raw) {
+    if (e.type === 'assistant_chunk') {
+      const delta = (e as { delta?: string }).delta ?? '';
+      unsealed.set(e.turnId, (unsealed.get(e.turnId) ?? '') + delta);
+      continue;
+    }
+    // A sealing message or a new provider iteration drops the pending run.
+    if (e.type === 'assistant_message' || e.type === 'provider_request') unsealed.delete(e.turnId);
+    if (!isRenderedEvent(e)) continue;
+    out.push(e);
+    // Terminal unsealed end → reconstruct the reply after the error/abort row,
+    // but ONLY for a turn the runner never sealed (a legacy log).
+    const terminal =
+      e.type === 'abort' || (e.type === 'error' && (e as { kind?: string }).kind === 'fatal');
+    if (terminal && !sealedTurns.has(e.turnId)) {
+      const text = unsealed.get(e.turnId);
+      if (text && text.trim()) {
+        out.push({
+          type: 'assistant_message',
+          content: text,
+          stopReason: 'end_turn',
+          // Stable per-turn id: the terminal event is unique to the turn, so this
+          // synth is produced in exactly one window (no cross-window dup).
+          id: `synth-unsealed:${e.turnId}`,
+          seq: e.seq,
+          ts: (e as { ts?: number }).ts ?? e.seq,
+          sessionId: e.sessionId,
+          turnId: e.turnId,
+          source: 'model',
+        } as unknown as MoxxyEvent);
+      }
+      unsealed.delete(e.turnId);
+    }
+  }
+  return out;
+}
 import {
   buildSnapshot,
   createSlot,
@@ -183,6 +265,13 @@ class ChatStore {
    * Load the most-recent window of a workspace's history on first open.
    * Idempotent — guarded by `loaded`. Loaded events are prepended (with
    * id-dedup) so any turn that raced ahead of the load stays newest.
+   *
+   * Prefers the RUNNER's authoritative log (`session.loadHistory`): the first
+   * load decides the slot's {@link Slot.historySource}. When the runner can't
+   * serve it (no connected runner for the workspace, a `<v10` runner, or a
+   * legacy-only chat with no runner session) it falls back to the NDJSON store —
+   * so no transcript goes blank. The two cursor spaces (runner `seq` vs NDJSON
+   * line-index) never mix within a slot.
    */
   async loadInitial(workspaceId: string): Promise<void> {
     const slot = this.ensure(workspaceId);
@@ -192,14 +281,28 @@ class ChatStore {
     slot.snap = null;
     this.emit();
     try {
-      const { events, prevCursor } = await this.persistence.loadSegment(
-        workspaceId,
-        null,
-        INITIAL_WINDOW,
-      );
-      this.prependFresh(slot, events);
-      slot.oldestCursor = prevCursor;
-      slot.hasOlder = prevCursor !== null;
+      // Prefer the runner, but only adopt it as the source if it actually
+      // yields RENDERED rows. An empty result — no runner backend, a `<v10`
+      // runner, or a legacy-only chat whose runner session resumed EMPTY — falls
+      // through to the NDJSON mirror so its history is never hidden behind an
+      // empty runner session.
+      const runner = await this.collectRunnerInitial(workspaceId);
+      if (runner && runner.events.length > 0) {
+        slot.historySource = 'runner';
+        this.prependFresh(slot, runner.events);
+        slot.oldestCursor = runner.prevCursor;
+        slot.hasOlder = runner.prevCursor !== null;
+      } else {
+        slot.historySource = 'ndjson';
+        const { events, prevCursor } = await this.persistence.loadSegment(
+          workspaceId,
+          null,
+          INITIAL_WINDOW,
+        );
+        this.prependFresh(slot, events);
+        slot.oldestCursor = prevCursor;
+        slot.hasOlder = prevCursor !== null;
+      }
     } catch {
       slot.loaded = false; // allow a retry on the next open
     } finally {
@@ -209,20 +312,57 @@ class ChatStore {
     }
   }
 
-  /** Fetch the page preceding the in-memory window (scroll-up). */
+  /**
+   * Pull the newest runner window for {@link loadInitial}, walking past
+   * all-non-rendered windows (bounded) so a window that holds no rendered rows
+   * YET doesn't read as "no history". Returns `null` when there is no runner
+   * backend / the runner can't serve the first page; otherwise the accumulated
+   * rendered events (possibly EMPTY — an empty runner log, e.g. a legacy-only
+   * chat) and the cursor for the next older page.
+   */
+  private async collectRunnerInitial(
+    workspaceId: string,
+  ): Promise<{ events: MoxxyEvent[]; prevCursor: number | null } | null> {
+    const first = await this.loadRunnerWindow(workspaceId, null, INITIAL_WINDOW);
+    if (!first) return null;
+    const events = [...first.events];
+    let cursor = first.prevCursor;
+    for (let pump = 0; pump < 10 && events.length === 0 && cursor !== null; pump += 1) {
+      const more = await this.loadRunnerWindow(workspaceId, cursor, INITIAL_WINDOW);
+      if (!more) break;
+      events.unshift(...more.events);
+      cursor = more.prevCursor;
+    }
+    return { events, prevCursor: cursor };
+  }
+
+  /** Fetch the page preceding the in-memory window (scroll-up), from whichever
+   *  source {@link loadInitial} settled on for this slot. */
   async loadOlder(workspaceId: string): Promise<void> {
     const slot = this.slots.get(workspaceId);
     if (!slot || !slot.hasOlder || slot.loadingOlder || !this.persistence) return;
     slot.loadingOlder = true;
     try {
-      const { events, prevCursor } = await this.persistence.loadSegment(
-        workspaceId,
-        slot.oldestCursor,
-        OLDER_PAGE,
-      );
-      this.prependFresh(slot, events);
-      slot.oldestCursor = prevCursor;
-      slot.hasOlder = prevCursor !== null;
+      if (slot.historySource === 'runner') {
+        const runner = await this.loadRunnerWindow(workspaceId, slot.oldestCursor, OLDER_PAGE);
+        if (runner) {
+          this.prependFresh(slot, runner.events);
+          slot.oldestCursor = runner.prevCursor;
+          slot.hasOlder = runner.prevCursor !== null;
+        }
+        // runner === null here means the runner dropped mid-scroll; leave the
+        // cursor/hasOlder untouched so a later scroll retries — we never switch
+        // cursor spaces to NDJSON mid-slot (its line-index cursor is unrelated).
+      } else {
+        const { events, prevCursor } = await this.persistence.loadSegment(
+          workspaceId,
+          slot.oldestCursor,
+          OLDER_PAGE,
+        );
+        this.prependFresh(slot, events);
+        slot.oldestCursor = prevCursor;
+        slot.hasOlder = prevCursor !== null;
+      }
     } catch {
       /* leave hasOlder set so the user can retry by scrolling */
     } finally {
@@ -233,6 +373,46 @@ class ChatStore {
       slot.snap = null;
       this.emit();
     }
+  }
+
+  /**
+   * Page the RUNNER's authoritative log into a window of at least `minRendered`
+   * RENDERED events (newest-first), filtering each raw page with
+   * {@link isRenderedEvent}. Walks `session.loadHistory`'s `seq` cursor until it
+   * has enough rendered rows, reaches the start of history, or the runner stops
+   * serving.
+   *
+   * Returns `null` (→ caller falls back to NDJSON) when the runner can't serve
+   * the FIRST page — no `loadHistory` backend, no connected runner, or a `<v10`
+   * runner. A `null` on a LATER page (the runner dropped mid-walk) just ends the
+   * window early with whatever rendered rows were gathered, keeping the `seq`
+   * cursor so the next scroll-up can resume.
+   */
+  private async loadRunnerWindow(
+    workspaceId: string,
+    before: number | null,
+    minRendered: number,
+  ): Promise<{ events: MoxxyEvent[]; prevCursor: number | null } | null> {
+    const loadHistory = this.persistence?.loadHistory?.bind(this.persistence);
+    if (!loadHistory) return null;
+    // Accumulate the RAW window (ascending seq) and project it as a whole, so
+    // an unsealed-turn reconstruction (projectRunnerWindow) sees a turn's chunks
+    // and its terminal row together rather than split per page.
+    const raw: MoxxyEvent[] = [];
+    let cursor = before;
+    for (let page = 0; page < MAX_RUNNER_PAGES; page += 1) {
+      const result = await loadHistory(workspaceId, cursor, RUNNER_RAW_PAGE);
+      if (result === null) {
+        if (page === 0) return null; // runner can't serve → NDJSON fallback
+        break; // dropped mid-walk → return what we have
+      }
+      // Pages arrive newest-first; prepend each older page ahead of the ones we
+      // already have so `raw` stays ascending (oldest-first).
+      raw.unshift(...result.events);
+      cursor = result.prevCursor;
+      if (cursor === null || projectRunnerWindow(raw).length >= minRendered) break;
+    }
+    return { events: projectRunnerWindow(raw), prevCursor: cursor };
   }
 
   private prependFresh(slot: Slot, events: ReadonlyArray<MoxxyEvent>): void {
