@@ -51,10 +51,31 @@ a cross-package boundary change (e.g. `u117-3` retry semantics, `u40-2` permissi
 anchoring, relocating voice tools to a new package) and are called out at their
 original entries — those are scoped follow-ups, not open quality debt.
 
-**No open findings remain from this audit.** Going forward this file resumes its
-normal role: the standing ledger where each future change retires ≥1 item and new
-debt is logged on sight (AGENTS.md → "Tech debt is a standing job"). A living
-codebase keeps accruing debt; the audit backlog itself is cleared.
+**No open findings remain from this audit.** A final pass (wave 12) closed the
+last deferred-for-scope items by implementing them: the SDK Node-only helpers now
+live behind a `@moxxy/sdk/server` subpath (dropped from the browser/RN-safe main
+barrel; every node-side consumer re-pointed; dep-cruiser widened to cruise the
+renderer + mobile-poc with a `no-node-builtins-in-renderer` error rule), the
+duplicated PCM16 MIME constant + the `/compact` flow now route through the SDK,
+`computeElisionState` is memoized + threaded once per iteration, and workflow
+`onError:'retry'` now honours `step.retries`.
+
+**Two items were closed as deliberate by-design decisions (not silent debt):**
+- `RequirementChecker.targetInfo` keeps its explicit per-kind `switch`. Each kind
+  reads a different registry with different active/version semantics; a clever
+  kind→table indirection in a correctness-critical requirement gate trades
+  clarity + safety for a DRY win that isn't worth it. The switch is the right
+  shape; kept intentionally (closes types-generics-5's table-drive half).
+- Voice-admin tools stay decomposed **in-place** within `cli/setup` (wave 10).
+  The atomicity goal (no god-function) is met; promoting them to a standalone
+  `@moxxy/plugin-voice-admin` package is a packaging-boundary preference, not a
+  quality fix, and is deliberately a non-goal for cli-bundled builtins.
+
+Going forward this file resumes its normal role: the standing ledger where each
+future change retires ≥1 item and new debt is logged on sight (AGENTS.md → "Tech
+debt is a standing job"). A living codebase under active development keeps
+accruing debt (this very sweep integrated the concurrently-merged anonymizer +
+mode-collaborative features mid-flight); the audit backlog itself is cleared.
 
 ---
 
@@ -141,10 +162,15 @@ standing backlog — pick from it, newest-audit-first, on the next pass).
   `requirements.targetInfo` table-drive; shared one-shot-stream + frontmatter
   parser + external-store + OAuth helpers (`t2-oneshot-stream-helper`,
   `t2-frontmatter-parser-dup`, `t2-external-store-dup`, `t2-shared-oauth-helpers`).
-- **Boundaries:** wall the Node-only SDK helpers behind a `./server` subpath +
-  widen dep-cruiser to the renderer/mobile-poc (`t2-sdk-server-subpath`); the
-  permission `inputMatches` anchoring (`u40-2`, changes match semantics);
-  unify `~/.moxxy` path derivation (`t2-moxxy-home-paths`).
+- **Boundaries:** ~~wall the Node-only SDK helpers behind a `./server` subpath +
+  widen dep-cruiser to the renderer/mobile-poc (`t2-sdk-server-subpath`)~~ ✅ DONE
+  2026-06-18 (see item #13 above); ~~the permission `inputMatches` anchoring
+  (`u40-2`)~~ ✅ DONE 2026-06-18 — resolved as a *contract* fix, NOT a semantics
+  change: `inputMatches` values stay UNANCHORED substring regexes (anchoring
+  them would break existing permission files), now documented on
+  `PolicyRule.inputMatches` + at the `matchRule` regex site and pinned by an
+  explicit substring-vs-author-anchored test; unify `~/.moxxy` path derivation
+  (`t2-moxxy-home-paths`).
 - **Completion:** wire or remove the desktop per-provider reasoning-effort
   control (`t2-security`/`c15`/R1); the half-built encrypted-reasoning round-trip
   (`u99-1`).
@@ -185,6 +211,23 @@ focused PR with its tests) and the low-severity **long-tail** clusters
 `.claude/audits/quality-sweep-findings.json` — triage highest-severity first; a
 150k-LOC codebase always carries a longtail, so treat this as the ongoing
 chip-away, not a one-shot zero.
+
+**Update — 2026-06-18 (workflow retry contract + DAG concurrency claim):** the
+two deferred `@moxxy/plugin-workflows` items are now resolved.
+- **`u117-3` retry semantics (fixed, regression-tested):** `runStep`
+  (`executor/steps.ts`) now gates retries on the three-valued `onError` contract
+  — `'retry'` runs `1 + retries` attempts; `'fail'`/`'continue'` run **exactly
+  one** attempt regardless of `retries`. This removes the latent trap where
+  `onError: 'fail' + retries: 3` silently retried. Schema/draft docs updated to
+  state the gate. Three new dag tests pin the attempt count per mode.
+- **`u117-1` DAG "runs waves up to concurrency" claim (resolved as misleading-
+  claim, not a behavior change):** parity for concurrent pure-step execution is
+  **unprovable** against the current observable contract — atomic per-step
+  started→terminal event pairs in wave order, the hard-failure-stops-the-rest-of-
+  the-wave error semantics (its own test), and wave-ordered `vars` merges are all
+  externally observable and would change under overlap. The executor description
+  and the scheduler comment now describe the strictly-sequential behavior plainly
+  (no "yet"/"deferred" wording) with the parity rationale spelled out.
 
 ## 2026-06-17 — Skills gallery reimplements the shared settings `SearchBox`
 
@@ -1250,20 +1293,27 @@ macOS 26) — or better, resolve a real `node` from PATH for the unit and only f
 the Electron binary. Low blast radius today (services are normally installed from a real
 terminal CLI), but silently wrong when it happens.
 
-### 13. `@moxxy/sdk` barrel re-exports node-only code → browser/RN bundles break — OPEN (partially mitigated)
+### 13. `@moxxy/sdk` barrel re-exports node-only code → browser/RN bundles break — ✅ RESOLVED 2026-06-18 (`t2-sdk-server-subpath`)
 **Observed 2026-06-17** building the cross-channel file-diff preview. The `@moxxy/sdk`
-index barrel re-exports node-coupled modules (e.g. `tunnel.js` → `node:child_process` via
-`spawnCliTunnel`), so ANY browser/React-Native consumer that imports a **runtime value**
-from `@moxxy/sdk` pulls those built-ins and fails to bundle: the desktop vite renderer
-errored `"spawn" is not exported by "__vite-browser-external"`, and Metro would hit the
-same. Type-only imports are fine (erased); the trap is value imports (here the pure diff
-helpers `toDiffRows`/`fileDiffSummary`/`isFileDiffDisplay`/…). Mitigated for this feature
-by adding a **dependency-free `@moxxy/sdk/tool-display` subpath export** and importing the
-helpers from there in chat-model/desktop/mobile. But the trap recurs every time a new pure
-SDK helper is needed by a renderer. Fix shape: either split the SDK into a browser-safe
-pure core entry + a node-only entry, or systematically expose each pure leaf module as its
-own subpath export (and lint/forbid renderer code importing the barrel for values). Low
-blast radius today (one-off per helper) but a sharp edge for every future shared helper.
+index barrel re-exported node-coupled **runtime values** (`spawnCliTunnel`/`isCliTunnelAvailable`
+→ `node:child_process`; `writeFileAtomic*`/`moxxyHome`/`moxxyPath` → `node:fs`/`os`;
+`readRequestBody`/`bearerTokenMatches` → `node:http`/`crypto`; the channel-auth helpers →
+`node:crypto`/`fs`/`path`), so any browser/RN consumer value-importing from `@moxxy/sdk`
+dragged those builtins into the bundle (vite renderer errored `"spawn" is not exported by
+"__vite-browser-external"`; Metro would hit the same). The wall held only by `import type`
+discipline. **Fix:** moved every Node-runtime VALUE export behind a new `./server` subpath
+(`packages/sdk/src/server.ts` + the `"./server"` entry in `exports`); the main barrel now
+keeps only the pure type exports of those modules (`TunnelHandle`, `WriteFileAtomicOptions`,
+`ChannelTokenOptions`, …). Every node-side consumer (cli/runner/desktop-host/core/channel/
+oauth/webhooks/mcp/workflows/scheduler/vault/memory/… + apps/desktop/electron) re-pointed to
+`@moxxy/sdk/server`. The `tool-display` subpath stays as the browser-safe rich-result path.
+**CI guard:** dep-cruiser now cruises `apps/desktop/src` + `apps/mobile-poc/src` and a new
+`no-node-builtins-in-renderer` rule (severity error) forbids any renderer/RN module reaching
+a `node:*` builtin (core modules kept in the cruise graph via an expanded `includeOnly`,
+matched by `dependencyTypes:['core']` since dep-cruiser strips the `node:` prefix). A
+`package-root.test.ts` guard asserts the moved symbols are absent from the main barrel and
+present on `./server`. Verified: `pnpm typecheck` 130/130, `pnpm check:deps` 0 errors,
+the rule fires when a node import is injected into either renderer.
 
 ---
 
