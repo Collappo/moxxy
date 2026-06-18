@@ -108,7 +108,14 @@ export interface ViewRendererDef {
  * parties, so a `javascript:` link is click-XSS on a shared surface.
  */
 export function isSafeViewUrl(url: string, attr: string): boolean {
-  const u = url.trim().toLowerCase();
+  // Strip ALL ASCII whitespace + C0 control chars (U+0000–U+0020) anywhere in
+  // the URL before the scheme check — the HTML URL parser removes tab/newline/CR
+  // before resolving the scheme, so `java\tscript:` would otherwise pass this
+  // gate and then execute as `javascript:` on click (audit u72-1). The frontend
+  // copy in @moxxy/plugin-channel-web/src/frontend/url-safety.ts is a verbatim
+  // lockstep duplicate (the browser bundle can't import this root) — keep both
+  // in sync.
+  const u = url.replace(/[\u0000-\u0020]/g, '').toLowerCase();
   if (u.startsWith('javascript:') || u.startsWith('vbscript:')) return false;
   if (u.startsWith('data:')) return attr === 'src' && u.startsWith('data:image/');
   if (/^[a-z][a-z0-9+.-]*:/.test(u)) return /^(https?:|mailto:|tel:)/.test(u);
@@ -176,3 +183,13 @@ export const VIEW_COMPONENTS: ReadonlyArray<ViewTagSpec> = [
 
 /** The default renderer's full allow-list (primitives + components). */
 export const DEFAULT_VIEW_TAGS: ReadonlyArray<ViewTagSpec> = [...VIEW_PRIMITIVES, ...VIEW_COMPONENTS];
+
+/**
+ * Count element + text nodes in a view tree (the `nodeCount` a `present_view`
+ * tool reports). Single source of truth: core's parser and the plugin-view tool
+ * both import this rather than re-implementing the recursion.
+ */
+export function countNodes(node: ViewNode): number {
+  if (node.kind === 'text') return 1;
+  return 1 + node.children.reduce((sum, child) => sum + countNodes(child), 0);
+}

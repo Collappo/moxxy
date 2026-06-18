@@ -1,10 +1,6 @@
 import { defineProvider, definePlugin } from '@moxxy/sdk';
-import {
-  OpenAIProvider,
-  validateOpenAICompatKey,
-  type OpenAIProviderConfig,
-} from '@moxxy/plugin-provider-openai';
-import { AnthropicProvider, type AnthropicProviderConfig } from '@moxxy/plugin-provider-anthropic';
+import { defineOpenAICompatProvider, pickOpenAICompatConfig } from '@moxxy/plugin-provider-openai';
+import { AnthropicProvider } from '@moxxy/plugin-provider-anthropic';
 import { glmModels } from './models.js';
 
 export { glmModels };
@@ -17,24 +13,16 @@ const ZAI_DEFAULT_MODEL = 'glm-4.6';
 
 /**
  * z.ai in "API key" mode: the standard, pay-as-you-go endpoint, which speaks
- * the OpenAI Chat Completions protocol. Reuses the shared {@link OpenAIProvider}
- * with the vendor slug + base URL + GLM catalog forced on (so usage stats,
- * provider events and error context attribute to `zai`, not `openai`).
+ * the OpenAI Chat Completions protocol. Reuses the shared
+ * {@link defineOpenAICompatProvider} with the vendor slug + base URL + GLM
+ * catalog forced on (so usage stats, provider events and error context
+ * attribute to `zai`, not `openai`).
  */
-export const zaiProviderDef = defineProvider({
+export const zaiProviderDef = defineOpenAICompatProvider({
   name: 'zai',
-  models: [...glmModels],
-  createClient: (config) => {
-    const cfg = config as OpenAIProviderConfig;
-    return new OpenAIProvider({
-      ...cfg,
-      name: 'zai',
-      baseURL: cfg.baseURL ?? ZAI_OPENAI_BASE_URL,
-      defaultModel: cfg.defaultModel ?? ZAI_DEFAULT_MODEL,
-      models: glmModels,
-    });
-  },
-  validateKey: (key) => validateOpenAICompatKey(key, { baseURL: ZAI_OPENAI_BASE_URL }),
+  baseURL: ZAI_OPENAI_BASE_URL,
+  defaultModel: ZAI_DEFAULT_MODEL,
+  models: glmModels,
   auth: {
     kind: 'apiKey',
     hint: 'z.ai API key (pay-as-you-go) from https://z.ai/manage-apikey/apikey-list',
@@ -53,9 +41,9 @@ export const zaiCodingPlanProviderDef = defineProvider({
   name: 'zai-coding-plan',
   models: [...glmModels],
   createClient: (config) => {
-    const cfg = config as AnthropicProviderConfig;
+    const cfg = pickOpenAICompatConfig(config);
     return new AnthropicProvider({
-      ...cfg,
+      apiKey: cfg.apiKey,
       name: 'zai-coding-plan',
       baseURL: cfg.baseURL ?? ZAI_ANTHROPIC_BASE_URL,
       defaultModel: cfg.defaultModel ?? ZAI_DEFAULT_MODEL,

@@ -5,9 +5,10 @@
  */
 
 import { existsSync, mkdirSync } from 'node:fs';
-import { readFile, readdir, writeFile } from 'node:fs/promises';
+import { readFile, readdir, unlink } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
+import { writeFileAtomic } from '@moxxy/sdk';
 import type { SkillFile } from '@moxxy/desktop-ipc-contract';
 
 /** Pull the frontmatter `description` (cheap regex — no YAML dep) so the
@@ -52,13 +53,14 @@ export async function readSkill(name: string): Promise<string> {
 
 export async function writeSkill(name: string, body: string): Promise<void> {
   assertSafeName(name);
-  ensureDir();
-  await writeFile(path.join(skillsDir(), name), body, 'utf8');
+  // writeFileAtomic mkdirs the target's dir, so a separate ensureDir() is
+  // redundant — and the tmp+rename means a crash mid-write can't truncate an
+  // existing skill file.
+  await writeFileAtomic(path.join(skillsDir(), name), body);
 }
 
 export async function deleteSkill(name: string): Promise<void> {
   assertSafeName(name);
-  const { unlink } = await import('node:fs/promises');
   try {
     await unlink(path.join(skillsDir(), name));
   } catch (e) {
@@ -68,7 +70,17 @@ export async function deleteSkill(name: string): Promise<void> {
 }
 
 function assertSafeName(name: string): void {
-  if (name.includes('/') || name.includes('..') || !name.endsWith('.md')) {
+  // Reject BOTH path separators (`/` POSIX, `\` Windows) explicitly — a bare
+  // `path.basename` check can't catch `\` on a POSIX host (it isn't a
+  // separator there), so a name like `sub\evil.md` would slip through and land
+  // in a subdir once the file lands on a Windows box. `..` blocks traversal and
+  // the `.md` suffix keeps the keyspace to skill files.
+  if (
+    name.includes('/') ||
+    name.includes('\\') ||
+    name.includes('..') ||
+    !name.endsWith('.md')
+  ) {
     throw new Error(`invalid skill name: ${name}`);
   }
 }
