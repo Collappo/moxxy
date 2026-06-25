@@ -1,11 +1,13 @@
 import type React from 'react';
-import { clearUsageStats } from '@moxxy/core';
+import { clearUsageStats, readSessionIndex } from '@moxxy/core';
 import { setCategoryDefault } from '@moxxy/config';
 import type { ClientSession as Session } from '@moxxy/sdk';
 import type { UserPromptAttachment } from '@moxxy/sdk';
+import { isSelectableMode } from '@moxxy/sdk';
 import type { ListPickerOption, ListPickerTab } from '../components/ListPicker.js';
 import type { Overlay, Picker } from './types.js';
 import { formatTokensShort } from './helpers.js';
+import { buildSessionPickerOptions } from './sessions-picker.js';
 
 export interface SlashDeps {
   session: Session;
@@ -22,6 +24,13 @@ export interface SlashDeps {
   /** Start a turn with the given text (used by /goal to kick off autonomous
    *  work immediately). Does not clear the system notice, unlike handleSubmit. */
   submitPrompt: (text: string) => void;
+  /**
+   * Whether the host can re-bootstrap onto a different session. Gates whether
+   * `/sessions` opens the switcher or shows a degrade notice. `false` on a thin
+   * client attached to an external `moxxy serve` (its runner owns a single fixed
+   * session).
+   */
+  canSwitchSession?: boolean;
 }
 
 export function runSlash(cmd: string, deps: SlashDeps): void {
@@ -117,6 +126,9 @@ export function runSlash(cmd: string, deps: SlashDeps): void {
       return;
     case 'model':
       return openModelPicker(deps);
+    case 'sessions':
+    case 'switch':
+      return openSessionsPicker(deps);
     case 'mcp':
       return openMcpPicker(deps);
     case 'mode':
@@ -235,6 +247,54 @@ function openModelPicker(deps: SlashDeps): void {
       searchable: true,
       searchPlaceholder: 'filter models…',
     });
+  })();
+}
+
+/** Subset of deps `openSessionsPicker` touches. Exported so picker-handlers can
+ *  re-open the switcher (e.g. after a failed switch) without dragging in all of
+ *  SlashDeps. */
+export interface OpenSessionsPickerDeps {
+  session: Session;
+  setPicker: (p: Picker) => void;
+  setSystemNotice: (msg: string | null) => void;
+  canSwitchSession?: boolean;
+}
+
+/**
+ * `/sessions` — the multi-session switcher. Lists the persisted sessions (from
+ * the same `~/.moxxy/sessions` index the desktop sidebar and `moxxy resume`
+ * read) with their first-prompt title, last-active time and event count, marks
+ * the one you're in, and offers a "+ New session" entry. Picking one re-points
+ * the TUI onto that session via the host's switch capability.
+ *
+ * Degrades to a notice when `canSwitchSession` is false (a thin client attached
+ * to an external `moxxy serve`, whose runner owns a single fixed session): the
+ * user is told to start a separate `moxxy tui` or use `moxxy resume`.
+ */
+export function openSessionsPicker(deps: OpenSessionsPickerDeps): void {
+  if (!deps.canSwitchSession) {
+    deps.setSystemNotice(
+      'switching sessions is only available when this TUI hosts the session. ' +
+        "You're attached to a running `moxxy serve` — run `moxxy resume` in a separate terminal to open another.",
+    );
+    return;
+  }
+  void (async () => {
+    try {
+      const metas = await readSessionIndex();
+      const options = buildSessionPickerOptions(metas, deps.session.id);
+      deps.setPicker({
+        kind: 'sessions',
+        title: 'Switch session',
+        options,
+        searchable: true,
+        searchPlaceholder: 'filter sessions…',
+      });
+    } catch (err) {
+      deps.setSystemNotice(
+        `failed to list sessions: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
   })();
 }
 
@@ -363,17 +423,21 @@ export function openPluginsPicker(deps: OpenPluginsPickerDeps): void {
     });
   }
 
-  // 2. Enable/disable axis — every installed package, kernel ones marked.
+  // 2. Enable/disable axis — every loaded package, badged by source: a kernel
+  // `core` package (can't disable), an on-demand `installed` one (from
+  // ~/.moxxy/plugins), or a `built-in` (bundled into the binary).
   const pkgOptions: ListPickerOption[] = [];
   for (const p of [...loaded].sort((a, b) => a.name.localeCompare(b.name))) {
     const isCore = core.has(p.name);
+    const badge = isCore ? 'core' : p.installed ? 'installed' : 'built-in';
+    const badgeColor = isCore ? 'cyan' : p.installed ? 'yellow' : 'green';
     pkgOptions.push({
       // Kernel packages can't be disabled — a `::core` selection just explains why.
       id: isCore ? `${p.name}::core` : `${p.name}::disable`,
       label: shortPluginName(p.name),
       description: `${p.kinds && p.kinds.length ? p.kinds.join(', ') : 'plugin'} · @${p.version}`,
-      badge: isCore ? 'core' : 'on',
-      badgeColor: isCore ? 'cyan' : 'green',
+      badge,
+      badgeColor,
     });
   }
   for (const name of [...disabled].sort()) {
@@ -490,16 +554,11 @@ function startCollab(deps: SlashDeps, arg: string): void {
   if (objective) deps.submitPrompt(objective);
 }
 
-// Collaboration is launched via `/collab <goal>` (single-flight), not the mode
-// picker; its peer modes are internal. Hidden from `/mode`.
-const COLLAB_HIDDEN_MODES: ReadonlySet<string> = new Set([
-  'collaborative',
-  'collab-architect',
-  'collab-peer',
-]);
-
 function openModePicker(deps: SlashDeps, arg = ''): void {
-  const modes = deps.session.modes.list().filter((m) => !COLLAB_HIDDEN_MODES.has(m.name));
+  const all = deps.session.modes.list();
+  // Special modes (e.g. the collaborative system, entered via /collab) are never
+  // listed or name-switched here — see ModeDef.special / isSelectableMode.
+  const modes = all.filter(isSelectableMode);
   if (modes.length === 0) {
     deps.setSystemNotice('no modes registered');
     return;
@@ -508,8 +567,14 @@ function openModePicker(deps: SlashDeps, arg = ''): void {
   // otherwise (no arg, or no match) fall back to the interactive picker.
   const target = arg.trim().toLowerCase();
   if (target) {
-    if (COLLAB_HIDDEN_MODES.has(target)) {
-      deps.setSystemNotice('Use /collab <goal> to run a collaborative team (only one runs at a time).');
+    const special = all.find((m) => m.name.toLowerCase() === target && !isSelectableMode(m));
+    if (special) {
+      const via = special.special?.invokedBy;
+      deps.setSystemNotice(
+        via
+          ? `"${special.name}" is a special mode — run /${via} to enter it.`
+          : `"${special.name}" is a special mode and can't be selected directly.`,
+      );
       return;
     }
     const match = modes.find((m) => m.name.toLowerCase() === target);
