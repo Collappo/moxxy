@@ -287,6 +287,32 @@ export const INSTALLABLE_PLUGIN_CATALOG: ReadonlyArray<PluginCatalogEntry> = [
     provides: [{ category: 'synthesizer', name: 'openai-tts' }],
   },
   {
+    id: 'tts-elevenlabs',
+    label: 'ElevenLabs read-aloud',
+    description: 'Text-to-speech via the ElevenLabs /v1/text-to-speech API (needs ELEVENLABS_API_KEY).',
+    packageName: '@moxxy/plugin-tts-elevenlabs',
+    installSpec: '@moxxy/plugin-tts-elevenlabs',
+    provides: [{ category: 'synthesizer', name: 'elevenlabs' }],
+  },
+  {
+    id: 'tts-local',
+    label: 'Local voice (offline TTS)',
+    description:
+      'Fully on-device text-to-speech (English + Polish) via sherpa-onnx Piper voices. No API key; each voice is a one-time ~64 MB verified download.',
+    packageName: '@moxxy/plugin-tts-local',
+    installSpec: '@moxxy/plugin-tts-local',
+    provides: [{ category: 'synthesizer', name: 'local-piper' }],
+  },
+  {
+    id: 'stt-local',
+    label: 'Local voice input (offline STT)',
+    description:
+      'Fully on-device speech-to-text via sherpa-onnx multilingual Whisper (English + Polish). No API key; the model is a one-time verified download (base ~198 MB by default; small ~610 MB recommended for Polish).',
+    packageName: '@moxxy/plugin-stt-local',
+    installSpec: '@moxxy/plugin-stt-local',
+    provides: [{ category: 'transcriber', name: 'local-whisper' }],
+  },
+  {
     id: 'provider-admin',
     label: 'Provider admin tools',
     description: 'provider_add/list/remove/test — register OpenAI-compatible vendors at runtime.',

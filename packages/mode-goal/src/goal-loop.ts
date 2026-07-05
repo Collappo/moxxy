@@ -1,19 +1,9 @@
 import {
-  buildSystemPromptWithSkills,
-  collectProviderStream,
-  createStuckLoopDetector,
-  emitRequestsAndDetectStuck,
-  executeToolUses,
-  isContextOverflowError,
-  nextBackoffMs,
-  projectMessages,
-  runCompactionIfNeeded,
-  runElisionIfNeeded,
-  sleepWithAbort,
-  usageEventFields,
+  runReactLoop,
   type ModeContext,
   type MoxxyEvent,
   type PermissionResolver,
+  type TurnCheckpoint,
 } from '@moxxy/sdk';
 
 import { detectGoalTerminal } from './completion.js';
@@ -21,56 +11,48 @@ import {
   CONTINUE_NUDGE,
   GOAL_ABANDON_TOOL,
   GOAL_COMPLETE_TOOL,
-  GOAL_MAX_ITERATIONS,
   GOAL_MAX_NOOP_ITERATIONS,
   GOAL_MODE_NAME,
   GOAL_PLUGIN_ID,
   GOAL_SYSTEM_PROMPT,
-  GOAL_TOKEN_BUDGET,
-  MAX_CONSECUTIVE_RETRIES,
   STALL_NUDGE,
+  STUCK_NUDGE_SUFFIX,
 } from './constants.js';
 
-/** Exponential back-off base/cap for the retry schedule (attempt is 1-based). */
-const RETRY_BACKOFF_BASE_MS = 500;
-const RETRY_BACKOFF_CAP_MS = 30_000;
-
-// Abort-aware sleep, injectable for tests so the back-off path runs instantly
-// and deterministically. Production delegates to the SDK's sleepWithAbort: a
-// real timer that clears (and drops its abort listener) when the signal fires,
-// so a pending back-off never outlives a cancelled goal run.
-let sleepImpl = (ms: number, signal: AbortSignal): Promise<void> => sleepWithAbort(ms, signal);
-
-/**
- * Override the retry back-off sleep (test seam). Returns a restore fn that
- * callers MUST invoke (in a `finally`) — `sleepImpl` is a module-scoped
- * singleton shared process-wide, so a leaked override bleeds the fake sleep
- * into every other turn/test running in the same worker. Test-only.
- */
-export function __setRetrySleepForTests(
-  fn: (ms: number, signal: AbortSignal) => Promise<void>,
-): () => void {
-  const prev = sleepImpl;
-  sleepImpl = fn;
-  return () => {
-    sleepImpl = prev;
-  };
-}
+// The retry back-off (and its test seam) lives in the SDK's shared ReAct
+// core now — re-export so existing importers/tests keep working.
+export { __setRetrySleepForTests } from '@moxxy/sdk';
 
 /**
  * Goal mode driver.
  *
- * Unlike tool-use (which returns the instant the model stops emitting tools),
- * goal mode treats "stopped emitting tools" as a cue to re-prompt: it keeps
- * the model working autonomously across iterations until the model explicitly
- * calls `goal_complete` (success) or `goal_abandon` (blocked). Every iteration
- * is guarded so the loop always terminates:
+ * Unlike the default mode (which returns the instant the model stops emitting
+ * tools), goal mode treats "stopped emitting tools" as a cue to re-prompt: it
+ * keeps the model working autonomously across iterations until the model
+ * explicitly calls `goal_complete` (success) or `goal_abandon` (blocked).
  *
- *   - hard iteration cap (`maxIterations`)
- *   - cumulative token budget
- *   - stuck-loop detector (same identical-call detection as tool-use)
- *   - no-progress detection (repeated idle iterations → stall stop)
- *   - `ctx.signal.aborted` checked every iteration and mid tool batch
+ * Goal mode is deliberately GUARDRAIL-FREE: the user asked for an outcome and
+ * opted into full autonomy, so nothing heuristic may kill the run mid-delivery.
+ * There is no iteration cap (unless the embedder set an explicit
+ * `ctx.maxIterations`), no token budget, and a stuck-loop trip steers the model
+ * instead of aborting. The ONLY ways a run ends:
+ *
+ *   - the model calls `goal_complete` (verified success) or `goal_abandon`
+ *     (blocked, needs the user),
+ *   - the model goes idle {@link GOAL_MAX_NOOP_ITERATIONS} rounds in a row
+ *     despite nudges — it has decided it's done without saying so, so the run
+ *     ends cleanly as a soft completion,
+ *   - the user aborts (Esc / stop), or
+ *   - a genuinely fatal condition (un-compactable context overflow, provider
+ *     giving up after bounded retries).
+ *
+ * Goal mode is also ONE-SHOT (`transient: true` on the ModeDef): it arms for a
+ * single objective. When the run concludes as DONE — `goal_complete` or the
+ * idle soft-completion — the session hands back to the mode that was active
+ * before goal mode (via `ctx.requestModeSwitch`), so the user's next message is
+ * normal chat again. While the goal is UNFINISHED — `goal_abandon` (the model
+ * needs an answer to continue), a fatal error, or a user abort — the mode stays
+ * armed so the user's reply resumes the autonomous run.
  *
  * Tool calls are auto-approved for the whole run (the user opted into full
  * autonomy) by swapping in a resolver that replaces only the PROMPT path:
@@ -96,10 +78,9 @@ export async function* runGoalMode(ctx: ModeContext): AsyncIterable<MoxxyEvent> 
   // Auto-approve for the duration of the run — the user chose to let goal
   // mode run unattended, so nothing may ever block on an interactive prompt.
   // But ONLY the prompt is skipped: the session resolver's prompt-free
-  // `policyCheck` (deny/allow rules from ~/.moxxy/permissions.json, then the
-  // tool's own declared rule) is consulted first, so a user deny rule still
-  // denies in goal mode. Anything the policy doesn't decide is allowed.
-  // Scoped to goalCtx so it never leaks past this loop.
+  // `policyCheck` is consulted first, so a user deny rule still denies in
+  // goal mode. Anything the policy doesn't decide is allowed. Scoped to
+  // goalCtx so it never leaks past this loop.
   const sessionResolver = ctx.permissions;
   const autoApprove: PermissionResolver = {
     name: 'goal-auto-approve',
@@ -115,6 +96,17 @@ export async function* runGoalMode(ctx: ModeContext): AsyncIterable<MoxxyEvent> 
     permissions: autoApprove,
   };
 
+  // Hand the session back to whatever the user was in before arming goal mode
+  // — applied by the runner AFTER the turn drains, and only on clean
+  // completion. Called on the DONE terminals only (complete / idle
+  // soft-completion): an unfinished goal (abandon / fatal / abort) keeps the
+  // mode armed so the user's reply resumes the run.
+  const disarm = (): void => {
+    const previous = ctx.previousModeName;
+    const target = previous && previous !== GOAL_MODE_NAME ? previous : 'default';
+    ctx.requestModeSwitch?.(target);
+  };
+
   yield await ctx.emit({
     type: 'plugin_event',
     sessionId: ctx.sessionId,
@@ -122,263 +114,74 @@ export async function* runGoalMode(ctx: ModeContext): AsyncIterable<MoxxyEvent> 
     source: 'plugin',
     pluginId: GOAL_PLUGIN_ID,
     subtype: 'goal_started',
-    payload: { autoApprove: true, maxIterations: ctx.maxIterations ?? GOAL_MAX_ITERATIONS },
+    payload: { autoApprove: true, maxIterations: ctx.maxIterations ?? null },
   });
 
-  const detector = createStuckLoopDetector(ctx.loopGuard);
-  // Coerce a caller/config-supplied bound to a positive integer. A degenerate
-  // value (0, negative, NaN, fractional) would otherwise make the for-loop
-  // never run and fall straight to the "iteration cap reached" fatal — work was
-  // never done, yet the message blames the model. The config schema validates
-  // this as a positive int, but programmatic callers (subagents/workflows)
-  // bypass that schema. Un-coercible (NaN) falls back to the default.
-  const requestedMaxIterations = ctx.maxIterations;
-  const maxIterations =
-    typeof requestedMaxIterations === 'number' && Number.isFinite(requestedMaxIterations)
-      ? Math.max(1, Math.floor(requestedMaxIterations))
-      : GOAL_MAX_ITERATIONS;
-  let noop = 0; // consecutive idle (no-tool) iterations
-  let totalTokens = 0;
-  let reactiveCompactions = 0;
-  const MAX_REACTIVE_COMPACTIONS = 2;
-  // Consecutive retryable-error count; reset on any clean provider call. Caps
-  // the busy-loop a sustained retryable condition (429 / overloaded / transient
-  // 5xx / ECONNRESET) would otherwise create — goal mode runs unattended with
-  // auto-approval, so a tight retry loop hammers the provider with nobody
-  // watching. The token budget can't backstop this: a request that errors
-  // before message_end reports no usage, so totalTokens never advances.
-  let consecutiveRetries = 0;
-
-  for (let iteration = 1; iteration <= maxIterations; iteration++) {
-    if (ctx.signal.aborted) {
-      yield await ctx.emit({
-        type: 'abort',
-        sessionId: ctx.sessionId,
-        turnId: ctx.turnId,
-        source: 'system',
-        reason: 'signal aborted',
-      });
-      return;
-    }
-
-    yield await ctx.emit({
-      type: 'mode_iteration',
-      sessionId: ctx.sessionId,
-      turnId: ctx.turnId,
-      source: 'system',
-      strategy: GOAL_MODE_NAME,
-      iteration,
-    });
-
-    await runCompactionIfNeeded(goalCtx);
-    await runElisionIfNeeded(goalCtx);
-
-    // Nudge only when the model went idle last iteration (no tool calls and no
-    // completion). After a productive iteration the tool results carry the
-    // model forward on their own — no nudge needed.
-    const nudge =
-      noop === 0 ? undefined : noop >= GOAL_MAX_NOOP_ITERATIONS - 1 ? STALL_NUDGE : CONTINUE_NUDGE;
-
-    const baseSystem = buildSystemPromptWithSkills(goalCtx.systemPrompt, goalCtx.skills.list()) ?? '';
-    const { messages, stablePrefixIndex } = projectMessages(goalCtx, {
-      ...(baseSystem ? { systemPrompt: baseSystem } : {}),
-      ...(nudge ? { trailingUserText: nudge } : {}),
-    });
-
-    yield await ctx.emit({
-      type: 'provider_request',
-      sessionId: ctx.sessionId,
-      turnId: ctx.turnId,
-      source: 'system',
-      provider: goalCtx.provider.name,
-      model: goalCtx.model,
-    });
-
-    const { text, toolUses, stopReason, error, usage, reasoning } = await collectProviderStream(
-      goalCtx,
-      messages,
-      {
-        iteration,
-        stablePrefixIndex,
-        // The nudge is volatile — injected for this call only, never appended
-        // to the log — so the cache strategy must keep its rolling tail
-        // breakpoint BEFORE it. Otherwise every idle iteration caches a
-        // prefix ending in a message that won't exist at that position next
-        // call: a guaranteed-wasted cache write.
-        ...(nudge ? { volatileTailCount: 1 } : {}),
-      },
-    );
-
-    yield await ctx.emit({
-      type: 'provider_response',
-      sessionId: ctx.sessionId,
-      turnId: ctx.turnId,
-      source: 'system',
-      provider: goalCtx.provider.name,
-      model: goalCtx.model,
-      ...usageEventFields(usage),
-    });
-
-    // Tally the FULL prompt of each call. Anthropic reports the cached portion
-    // separately (`inputTokens` is only the non-cached prefix), so on a long
-    // goal run — where the rolling cache breakpoint serves most of the prompt
-    // as cacheRead — counting input+output alone undercounts by a large factor
-    // and the runaway-budget backstop could be exceeded many times over before
-    // it trips. Include both cache fields so the budget reflects real usage.
-    if (usage)
-      totalTokens +=
-        (usage.inputTokens ?? 0) +
-        (usage.cacheReadTokens ?? 0) +
-        (usage.cacheCreationTokens ?? 0) +
-        (usage.outputTokens ?? 0);
-
-    if (error) {
-      const overflow = isContextOverflowError(error.message);
-      if (overflow && reactiveCompactions < MAX_REACTIVE_COMPACTIONS) {
-        const compacted = await runCompactionIfNeeded(goalCtx, { force: true });
-        if (compacted) {
-          // Only count an attempt that actually compacted — a no-op (overflow
-          // lives in the un-compactable recent tail) must not deny a later,
-          // genuinely compactable overflow its retry.
-          reactiveCompactions += 1;
-          yield await ctx.emit({
-            type: 'error',
-            sessionId: ctx.sessionId,
-            turnId: ctx.turnId,
-            source: 'system',
-            kind: 'retryable',
-            message: 'context window exceeded — compacted older turns, retrying',
-          });
-          continue;
-        }
-      }
-      // A context overflow that can't be compacted further is fatal regardless
-      // of the provider's `retryable` flag: some providers mark "reduce the
-      // length" errors retryable, but the prompt cannot shrink, so a retry just
-      // re-sends the identical over-budget request and overflows again — a tight
-      // loop bounded only by maxIterations (the request errors before usage is
-      // reported, so the token budget never advances to stop it).
-      const fatal = !error.retryable || overflow;
-      if (fatal) {
-        yield await ctx.emit({
-          type: 'error',
+  // The model idled without calling goal_complete: nudge it back to work with
+  // a volatile trailing prompt (this call only — never appended to the log).
+  // After GOAL_MAX_NOOP_ITERATIONS consecutive idle rounds the model has
+  // clearly decided it's done without declaring it — end the run cleanly as a
+  // soft completion (and disarm) rather than spin forever.
+  const idleNudge: TurnCheckpoint = {
+    name: 'goal-idle',
+    gateOn: 'idle',
+    run: async (check) => {
+      if (check.consecutiveIdle >= GOAL_MAX_NOOP_ITERATIONS) {
+        await goalCtx.emit({
+          type: 'plugin_event',
           sessionId: ctx.sessionId,
           turnId: ctx.turnId,
-          source: 'system',
-          kind: 'fatal',
-          message: `goal: ${error.message}`,
+          source: 'plugin',
+          pluginId: GOAL_PLUGIN_ID,
+          subtype: 'goal_stalled',
+          payload: { idleIterations: check.consecutiveIdle, iteration: check.iteration },
         });
-        return;
-      }
-      // Retryable: surface it, then back off before retrying. A persistent
-      // retryable condition (sustained 429 / outage) must NOT busy-loop the
-      // provider — give up with a fatal error after the bounded retry count.
-      // The counter resets on any clean provider call, so a long run can still
-      // recover from transient blips.
-      consecutiveRetries += 1;
-      yield await ctx.emit({
-        type: 'error',
-        sessionId: ctx.sessionId,
-        turnId: ctx.turnId,
-        source: 'system',
-        kind: 'retryable',
-        message: `goal: ${error.message}`,
-      });
-      if (consecutiveRetries >= MAX_CONSECUTIVE_RETRIES) {
-        yield await ctx.emit({
-          type: 'error',
-          sessionId: ctx.sessionId,
-          turnId: ctx.turnId,
-          source: 'system',
-          kind: 'fatal',
-          message:
-            `goal: provider kept returning a retryable error ${consecutiveRetries} times in a row ` +
-            `(last: ${error.message}); giving up rather than hammering the provider.`,
-        });
-        return;
-      }
-      await sleepImpl(
-        nextBackoffMs(consecutiveRetries, RETRY_BACKOFF_BASE_MS, RETRY_BACKOFF_CAP_MS),
-        ctx.signal,
-      );
-      if (ctx.signal.aborted) {
-        yield await ctx.emit({
-          type: 'abort',
-          sessionId: ctx.sessionId,
-          turnId: ctx.turnId,
-          source: 'system',
-          reason: 'signal aborted during retry back-off',
-        });
-        return;
-      }
-      continue;
-    }
-    // Clean provider call — reset the overflow-recovery + retry budgets.
-    reactiveCompactions = 0;
-    consecutiveRetries = 0;
-
-    // Finalize the reasoning summary for THIS call before any exit decision or
-    // tool/assistant emit, so the log order is reasoning → tool_use → text
-    // (projection attaches the signed thinking block as content[0] of the same
-    // turn). Emitting it ahead of the budget backstop keeps every exit path
-    // consistent — the budget-exhausting call's reasoning is logged just like
-    // any other call's, rather than being silently dropped at this exit.
-    if (reasoning) {
-      yield await ctx.emit({
-        type: 'reasoning_message',
-        sessionId: ctx.sessionId,
-        turnId: ctx.turnId,
-        source: 'model',
-        content: reasoning.text,
-        ...(reasoning.signature ? { signature: reasoning.signature } : {}),
-        ...(reasoning.redacted ? { redacted: true } : {}),
-        ...(reasoning.encrypted ? { encrypted: reasoning.encrypted } : {}),
-      });
-    }
-
-    // Token budget backstop (alongside the iteration cap).
-    if (totalTokens > GOAL_TOKEN_BUDGET) {
-      // Persist the budget-exhausting call's assistant text before exiting,
-      // just like every productive iteration does (the assistant emit below
-      // this block is skipped by the `return`). Otherwise the model's last
-      // words vanish from the log, so a resume ("continue from here") loses
-      // that context. We do NOT execute its tool calls — the run is stopping.
-      if (text || stopReason === 'end_turn' || toolUses.length === 0) {
-        yield await ctx.emit({
+        await goalCtx.emit({
           type: 'assistant_message',
           sessionId: ctx.sessionId,
           turnId: ctx.turnId,
-          source: 'model',
-          content: text,
-          stopReason,
+          source: 'system',
+          content:
+            'Goal run ended: the model stopped working without calling `goal_complete` — ' +
+            'it likely considers the goal done. Review the work above; if something is ' +
+            'missing, describe it in your next message.',
+          stopReason: 'end_turn',
         });
+        disarm();
+        return { action: 'stop' };
       }
-      yield await ctx.emit({
-        type: 'plugin_event',
-        sessionId: ctx.sessionId,
-        turnId: ctx.turnId,
-        source: 'plugin',
-        pluginId: GOAL_PLUGIN_ID,
-        subtype: 'goal_budget_exhausted',
-        payload: { totalTokens, budget: GOAL_TOKEN_BUDGET, iteration },
-      });
-      yield await ctx.emit({
-        type: 'assistant_message',
-        sessionId: ctx.sessionId,
-        turnId: ctx.turnId,
-        source: 'system',
-        content:
-          `Goal mode stopped: token budget exhausted (${totalTokens.toLocaleString()} > ` +
-          `${GOAL_TOKEN_BUDGET.toLocaleString()}) before the goal was completed. ` +
-          `Send another message to continue from here.`,
-        stopReason: 'end_turn',
-      });
-      return;
-    }
+      return {
+        action: 'inject',
+        volatile: true,
+        text: check.consecutiveIdle >= GOAL_MAX_NOOP_ITERATIONS - 1 ? STALL_NUDGE : CONTINUE_NUDGE,
+      };
+    },
+  };
 
-    const stuck = yield* emitRequestsAndDetectStuck(ctx, toolUses, detector, {
-      abortedResultMessage: 'goal mode aborted (stuck pattern) before this call ran',
+  yield* runReactLoop(goalCtx, {
+    strategyName: GOAL_MODE_NAME,
+    // No iteration cap: a goal run ends via its terminals, never because a
+    // counter ran out mid-delivery. An explicit ctx.maxIterations (set by a
+    // programmatic embedder) still takes precedence inside runReactLoop.
+    defaultMaxIterations: Number.POSITIVE_INFINITY,
+    errorPrefix: 'goal: ',
+    checkpoints: [idleNudge],
+    // The idle checkpoint stops itself at GOAL_MAX_NOOP_ITERATIONS consecutive
+    // idles, before this backstop can trip — it exists so a future checkpoint
+    // bug degrades loudly instead of looping. (The core resets the budget
+    // whenever the model does tool work, so spread-out idle rounds across a
+    // long run never exhaust it.)
+    maxInjections: GOAL_MAX_NOOP_ITERATIONS,
+    stuck: {
+      // Never abort an unattended run on a repetition heuristic — the repeats
+      // are often legitimate (re-running a failing build between edits).
+      // Steer instead: visible warning + a volatile nudge on the next call.
+      action: 'nudge',
       nearHint: 'against the same target (only volatile args varied)',
+      nudgeText: ({ toolName, count, how }) =>
+        `You have called the tool \`${toolName}\` ${count} times ${how}. Repeating the same ` +
+        `call will not produce a different result. Step back, reassess, and take a DIFFERENT ` +
+        `next action toward the goal. ${STUCK_NUDGE_SUFFIX}`,
       extraOnStuck: ({ toolName, count, kind }) => [
         {
           type: 'plugin_event',
@@ -390,130 +193,100 @@ export async function* runGoalMode(ctx: ModeContext): AsyncIterable<MoxxyEvent> 
           payload: { tool: toolName, count, kind },
         },
       ],
-      fatalMessage: ({ toolName, count, how }) =>
-        `goal mode aborted — stuck pattern: tool "${toolName}" called ${count} times ${how}. ` +
-        `The model is looping on the same call; send another message to redirect it.`,
-    });
-    if (stuck) return;
-
-    if (text || stopReason === 'end_turn' || toolUses.length === 0) {
-      yield await ctx.emit({
-        type: 'assistant_message',
-        sessionId: ctx.sessionId,
-        turnId: ctx.turnId,
-        source: 'model',
-        content: text,
-        stopReason,
-      });
-    }
-
-    if (toolUses.length === 0) {
-      // The model idled without calling goal_complete. Count it; nudge next
-      // iteration. After enough idle rounds, stop rather than spin forever.
-      noop += 1;
-      if (noop >= GOAL_MAX_NOOP_ITERATIONS) {
-        yield await ctx.emit({
+    },
+    onToolBatchEnd: async (loopCtx, { toolUses, iteration }) => {
+      // Did this batch end the run? (goal_complete / goal_abandon, confirmed
+      // via a successful tool_result in the log.) Only materialise the log
+      // (an O(n) copy of the ever-growing append-only log) when the batch
+      // actually used a goal tool — otherwise this ran on every productive
+      // iteration, O(n²) per run.
+      const hasGoalTool = toolUses.some(
+        (t) => t.name === GOAL_COMPLETE_TOOL || t.name === GOAL_ABANDON_TOOL,
+      );
+      const terminal = hasGoalTool ? detectGoalTerminal(loopCtx.log.slice(), toolUses) : null;
+      if (terminal?.kind === 'complete') {
+        await loopCtx.emit({
           type: 'plugin_event',
           sessionId: ctx.sessionId,
           turnId: ctx.turnId,
           source: 'plugin',
           pluginId: GOAL_PLUGIN_ID,
-          subtype: 'goal_stalled',
-          payload: { idleIterations: noop, iteration },
+          subtype: 'goal_completed',
+          payload: {
+            summary: terminal.summary,
+            evidenceCount: terminal.evidence.length,
+            iterations: iteration,
+          },
         });
-        yield await ctx.emit({
+        const evidenceBlock =
+          terminal.evidence.length > 0
+            ? `\n\n${terminal.evidence.map((e) => `- ${e}`).join('\n')}`
+            : '';
+        await loopCtx.emit({
+          type: 'assistant_message',
+          sessionId: ctx.sessionId,
+          turnId: ctx.turnId,
+          source: 'system',
+          content: `✓ Goal complete — ${terminal.summary}${evidenceBlock}`,
+          stopReason: 'end_turn',
+        });
+        disarm();
+        return { action: 'stop' };
+      }
+      if (terminal?.kind === 'abandon') {
+        await loopCtx.emit({
+          type: 'plugin_event',
+          sessionId: ctx.sessionId,
+          turnId: ctx.turnId,
+          source: 'plugin',
+          pluginId: GOAL_PLUGIN_ID,
+          subtype: 'goal_abandoned',
+          payload: {
+            reason: terminal.reason,
+            ...(terminal.needsFromUser ? { needsFromUser: terminal.needsFromUser } : {}),
+            iterations: iteration,
+          },
+        });
+        const needs = terminal.needsFromUser ? `\n\nNeeds from you: ${terminal.needsFromUser}` : '';
+        await loopCtx.emit({
           type: 'assistant_message',
           sessionId: ctx.sessionId,
           turnId: ctx.turnId,
           source: 'system',
           content:
-            'Goal mode stopped: the model went idle without calling `goal_complete`. ' +
-            'It may believe the goal is done — review the work above, and send another message to continue if not.',
+            `Goal abandoned — ${terminal.reason}${needs}\n\n` +
+            `Goal mode stays armed: your reply resumes the autonomous run.`,
           stopReason: 'end_turn',
         });
-        return;
+        // Deliberately NOT disarming: the model needs something from the user
+        // and their reply should resume the autonomous run.
+        return { action: 'stop' };
       }
-      continue;
-    }
-    noop = 0;
-
-    const exited = yield* executeToolUses(goalCtx, toolUses, iteration);
-    if (exited) return;
-
-    // Did this batch end the run? (goal_complete / goal_abandon, confirmed via
-    // a successful tool_result in the log.) Only materialise the log (an O(n)
-    // copy of the ever-growing append-only log) when the batch actually used a
-    // goal tool — otherwise this ran on every productive iteration, O(n²) per
-    // run. detectGoalTerminal itself early-returns null on an empty batch, so a
-    // batch with no goal tools needs no log at all.
-    const hasGoalTool = toolUses.some(
-      (t) => t.name === GOAL_COMPLETE_TOOL || t.name === GOAL_ABANDON_TOOL,
-    );
-    const terminal = hasGoalTool ? detectGoalTerminal(ctx.log.slice(), toolUses) : null;
-    if (terminal?.kind === 'complete') {
-      yield await ctx.emit({
+      return undefined;
+    },
+    onMaxIterations: async (loopCtx, maxIterations) => {
+      // Only reachable when an embedder set an explicit ctx.maxIterations —
+      // goal mode itself is uncapped.
+      await loopCtx.emit({
         type: 'plugin_event',
         sessionId: ctx.sessionId,
         turnId: ctx.turnId,
         source: 'plugin',
         pluginId: GOAL_PLUGIN_ID,
-        subtype: 'goal_completed',
-        payload: { summary: terminal.summary, evidenceCount: terminal.evidence.length, iterations: iteration },
+        subtype: 'goal_max_iterations',
+        payload: { maxIterations },
       });
-      const evidenceBlock =
-        terminal.evidence.length > 0 ? `\n\n${terminal.evidence.map((e) => `- ${e}`).join('\n')}` : '';
-      yield await ctx.emit({
-        type: 'assistant_message',
+      await loopCtx.emit({
+        type: 'error',
         sessionId: ctx.sessionId,
         turnId: ctx.turnId,
         source: 'system',
-        content: `✓ Goal complete — ${terminal.summary}${evidenceBlock}`,
-        stopReason: 'end_turn',
+        kind: 'fatal',
+        message:
+          `goal mode reached the configured iteration cap (${maxIterations}) without calling ` +
+          `goal_complete. Send another message to continue.`,
       });
-      return;
-    }
-    if (terminal?.kind === 'abandon') {
-      yield await ctx.emit({
-        type: 'plugin_event',
-        sessionId: ctx.sessionId,
-        turnId: ctx.turnId,
-        source: 'plugin',
-        pluginId: GOAL_PLUGIN_ID,
-        subtype: 'goal_abandoned',
-        payload: { reason: terminal.reason, ...(terminal.needsFromUser ? { needsFromUser: terminal.needsFromUser } : {}), iterations: iteration },
-      });
-      const needs = terminal.needsFromUser ? `\n\nNeeds from you: ${terminal.needsFromUser}` : '';
-      yield await ctx.emit({
-        type: 'assistant_message',
-        sessionId: ctx.sessionId,
-        turnId: ctx.turnId,
-        source: 'system',
-        content: `Goal abandoned — ${terminal.reason}${needs}`,
-        stopReason: 'end_turn',
-      });
-      return;
-    }
-  }
-
-  // Iteration cap hit without the model declaring done.
-  yield await ctx.emit({
-    type: 'plugin_event',
-    sessionId: ctx.sessionId,
-    turnId: ctx.turnId,
-    source: 'plugin',
-    pluginId: GOAL_PLUGIN_ID,
-    subtype: 'goal_max_iterations',
-    payload: { maxIterations },
-  });
-  yield await ctx.emit({
-    type: 'error',
-    sessionId: ctx.sessionId,
-    turnId: ctx.turnId,
-    source: 'system',
-    kind: 'fatal',
-    message:
-      `goal mode reached the iteration cap (${maxIterations}) without calling goal_complete. ` +
-      `Stopping to avoid an unbounded run; send another message to continue.`,
+    },
   });
 }
 

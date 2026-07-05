@@ -1,5 +1,20 @@
 # @moxxy/chat-model
 
+## 0.3.19
+
+### Patch Changes
+
+- Updated dependencies [6c0af71]
+  - @moxxy/sdk@0.28.1
+
+## 0.3.18
+
+### Patch Changes
+
+- Updated dependencies [3e4b2b4]
+- Updated dependencies [e4e2941]
+  - @moxxy/sdk@0.28.0
+
 ## 0.3.17
 
 ### Patch Changes

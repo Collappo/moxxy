@@ -249,6 +249,9 @@ export {
   buildSystemPromptWithSkills,
   createStuckLoopDetector,
   stableHash,
+  runReactLoop,
+  MAX_CONSECUTIVE_RETRIES,
+  __setRetrySleepForTests,
   type CollectedToolUse,
   type StreamResult,
   type ProjectMessagesOptions,
@@ -256,12 +259,22 @@ export {
   type StuckLoopDetector,
   type StuckSignal,
   type LoopGuardSettings,
+  type ReactLoopOptions,
+  type ProviderSuccessInfo,
+  type ToolBatchInfo,
+  type StopDirective,
+  type CheckpointContext,
+  type CheckpointResult,
+  type TurnCheckpoint,
 } from './mode-helpers.js';
 export {
   dispatchToolCall,
   executeToolUses,
   emitRequestsAndDetectStuck,
+  emitRequestsAndNudgeOnStuck,
   type StuckLoopReport,
+  type StuckNudgeReport,
+  type StuckTripInfo,
 } from './tool-dispatch.js';
 
 export type { TokenBudget, CompactContext, CompactorDef } from './compactor.js';
