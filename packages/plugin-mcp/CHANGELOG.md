@@ -1,5 +1,57 @@
 # @moxxy/plugin-mcp
 
+## 0.27.0
+
+### Minor Changes
+
+- 502acf0: Slim wave, final batches: the whisper STT pair, the Telegram + Slack
+  channels, provider-admin and mcp move out of the CLI binary — all seeded
+  into the desktop (voice, Settings panels and Apps→Channels keep working
+  offline) and installable on demand everywhere else. `moxxy telegram` /
+  `moxxy channels start slack` on a slim install print the exact install
+  command instead of "unknown command". `@moxxy/config` flips public as the
+  channels' dependency closure. The kernel is now the plan's target set: the
+  TUI, built-in tools, default mode, context floors, vault, plugins-admin,
+  commands, memory, the two OAuth providers, and the dormant daemons.
+
+### Patch Changes
+
+- 87aac6d: Declare honest `isolation` capability specs on the remaining admin and long-tail plugin tools (36 tools across 13 packages), completing the backfill that lets `security.requireDeclaration` be enabled.
+- Updated dependencies [e791484]
+- Updated dependencies [49b1d73]
+- Updated dependencies [3b27404]
+- Updated dependencies [0b6f40e]
+- Updated dependencies [2cff46b]
+- Updated dependencies [2cef8e1]
+- Updated dependencies [98f545c]
+- Updated dependencies [ee2967d]
+- Updated dependencies [2a35357]
+- Updated dependencies [67a3387]
+- Updated dependencies [be28d55]
+  - @moxxy/sdk@0.27.0
+
+## 0.26.0
+
+### Minor Changes
+
+- 386e526: Slim wave, batch 2: `@moxxy/plugin-view`, `@moxxy/plugin-self-update` and
+  `@moxxy/plugin-voice-admin` (plugin renamed from `@moxxy/voice-admin` to
+  match its package) move out of the CLI binary and install on demand.
+  `@moxxy/plugin-provider-admin` + `@moxxy/plugin-mcp` (entry alias
+  `@moxxy/plugin-mcp-admin` dropped — the plugin now registers under its
+  package name) flip publishable as prep but stay bundled until the desktop
+  seed pack lands: the desktop Settings panels reach them through the
+  `providerAdmin`/`mcpAdmin` session services on the spawned runner.
+  self-update's staged-update finalizer stays inlined in the binary (bin.ts
+  imports it statically); only the registered plugin instance moves out.
+
+### Patch Changes
+
+- Updated dependencies [8c70f3c]
+- Updated dependencies [8c70f3c]
+- Updated dependencies [ce56ef6]
+  - @moxxy/sdk@0.26.0
+
 ## 0.0.38
 
 ### Patch Changes

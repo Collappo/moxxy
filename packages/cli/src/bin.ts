@@ -9,8 +9,10 @@ import { runPluginsCommand } from './commands/plugins.js';
 import { runChannelsCommand } from './commands/channels.js';
 import { runChannelByName } from './commands/run-channel.js';
 import { runInitCommand } from './commands/init.js';
+import { runOnboardCommand } from './commands/onboard.js';
 import { runProvisionCommand } from './commands/provision.js';
 import { runPermsCommand } from './commands/perms.js';
+import { runConfigCommand } from './commands/config.js';
 import { runMemoryCommand } from './commands/memory.js';
 import { runMcpCommand } from './commands/mcp.js';
 import { runScheduleCommand } from './commands/schedule.js';
@@ -54,6 +56,7 @@ const SECTIONS: ReadonlyArray<{ readonly title: string; readonly rows: ReadonlyA
   {
     title: 'SETUP',
     rows: [
+      ['onboard', 'guided setup: provider → messaging channel → pairing → background service'],
       ['init', 'interactive first-time setup (provider keys → vault)'],
       ['provision', 'headless setup: install + configure a provider (flags or --spec -)'],
       ['login <provider>', 'OAuth sign-in for providers that don\'t use API keys'],
@@ -83,6 +86,7 @@ const SECTIONS: ReadonlyArray<{ readonly title: string; readonly rows: ReadonlyA
       ['plugins list|search|install|remove|enable|disable|reload|new', 'find, install + manage plugins'],
       ['self-update status|rollback', 'inspect / roll back self-update transactions'],
       ['perms list|allow|deny|remove|clear|path', 'view / edit the permission policy'],
+      ['config show|get|set|path', 'read / edit the moxxy config (user or project scope)'],
       ['memory list|audit|show|revert|prune-stale|path', 'curate long-term memory'],
       ['security audit|isolators|status', 'inspect plugin-security isolation state'],
       ['mcp list|enable|disable|remove|path', 'manage Model Context Protocol servers'],
@@ -179,7 +183,7 @@ function renderHelp(): string {
     `${' '.repeat(RULE_INDENT)}${colors.dim('prompted values are saved back to the vault).')}`,
   );
   out.push('');
-  out.push(`${colors.dim('Run')} ${colors.bold('moxxy init')} ${colors.dim('to get started.')}`);
+  out.push(`${colors.dim('Run')} ${colors.bold('moxxy onboard')} ${colors.dim('to get started.')}`);
   out.push(`${colors.dim('See')} ${colors.bold('moxxy <command> --help')} ${colors.dim('for per-command details.')}`);
 
   return out.join('\n') + '\n';
@@ -204,9 +208,11 @@ const COMMANDS: Record<string, CommandHandler> = {
     return 0;
   },
   init: runInitCommand,
+  onboard: runOnboardCommand,
   provision: runProvisionCommand,
   login: runLoginCommand,
   perms: runPermsCommand,
+  config: runConfigCommand,
   memory: runMemoryCommand,
   mcp: runMcpCommand,
   schedule: runScheduleCommand,
@@ -287,6 +293,20 @@ async function main(): Promise<number> {
     // Outside the try: any error from running the channel propagates
     // normally and is surfaced by the top-level .catch in main().then().
     return await runChannelByName(argv.command, argv);
+  }
+
+  // Slim kernel: the name may be a KNOWN channel whose package just isn't
+  // installed (telegram/slack/web/http install on demand). Point at the
+  // install instead of a bare "unknown command".
+  const { findCatalogEntryForChannel } = await import('./channel-hints.js');
+  const hint = findCatalogEntryForChannel(argv.command);
+  if (hint) {
+    process.stderr.write(
+      colors.red(`channel not installed: ${argv.command}`) +
+        `\ninstall it with: ${colors.bold(`moxxy plugins install ${hint.id}`)}` +
+        `\n(or from the TUI: /plugins → Installable → ${hint.label})\n`,
+    );
+    return 2;
   }
 
   process.stderr.write(

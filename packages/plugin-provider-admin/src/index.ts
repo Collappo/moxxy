@@ -365,7 +365,7 @@ export function buildProviderAdminPluginWithApi(opts: BuildProviderAdminPluginOp
           code: 'CONFIG_INVALID',
           message:
             `provider-admin: "${name}" is a built-in provider and cannot be reconfigured here — ` +
-            `built-ins are code. Only runtime-registered (providers.json) providers are editable.`,
+            `built-ins are code. Only runtime-registered (stored) providers are editable.`,
         });
       }
       // Defense-in-depth: validate the patch HERE (where it is persisted), not
@@ -378,7 +378,7 @@ export function buildProviderAdminPluginWithApi(opts: BuildProviderAdminPluginOp
           code: 'CONFIG_INVALID',
           message:
             `provider-admin: no stored provider named "${name}" — only runtime-registered ` +
-            `(providers.json) providers are configurable; built-ins are code.`,
+            `(stored) providers are configurable; built-ins are code.`,
         });
       }
       const next: StoredProvider = {
@@ -410,6 +410,9 @@ export function buildProviderAdminPlugin(
 ): Plugin {
   const engine = sharedEngine ?? createProviderAdminEngine(opts);
   const { providerRegistry, configPath } = engine;
+  // Stored vendors persist in the unified user config (or the injected
+  // override path in tests) — the fs surface of every tool below.
+  const configGlob = configPath ?? '~/.moxxy/config.yaml';
 
   return definePlugin({
     name: '@moxxy/plugin-provider-admin',
@@ -420,11 +423,22 @@ export function buildProviderAdminPlugin(
         description:
           'Register an OpenAI-compatible LLM provider (z.ai, deepseek, groq, openrouter, fireworks, ' +
           'together, mistral, …) with moxxy. Wraps the in-process OpenAI client with the vendor baseURL + ' +
-          'a user-supplied models list. Persists to ~/.moxxy/providers.json so the provider survives ' +
+          'a user-supplied models list. Persists to the unified config (plugins.provider.items) so the provider survives ' +
           'restarts. The new provider is registered in the LIVE session — switch to it with /provider ' +
           'or set it as the default in moxxy.config.ts.',
         inputSchema: addProviderInput,
         permission: { action: 'prompt' },
+        // The handler performs NO network I/O itself (register + persist
+        // only), but the input carries the vendor `baseURL` — an arbitrary,
+        // caller-chosen endpoint the cap checker validates against `net` —
+        // so 'any' reflects the genuinely dynamic vendor host.
+        isolation: {
+          capabilities: {
+            fs: { read: [configGlob], write: [configGlob] },
+            net: { mode: 'any' },
+            timeMs: 30_000,
+          },
+        },
         handler: async (input) => {
           if (engine.isBuiltin(input.name)) {
             throw new MoxxyError({
@@ -475,9 +489,16 @@ export function buildProviderAdminPlugin(
       defineTool({
         name: 'provider_list',
         description:
-          'List user-registered providers (persisted in ~/.moxxy/providers.json) plus their default model and base URL. ' +
+          'List user-registered providers (persisted in the unified config (plugins.provider.items)) plus their default model and base URL. ' +
           'Built-in providers (anthropic, openai, openai-codex) are NOT included — query session.providers for those.',
         inputSchema: z.object({}),
+        isolation: {
+          capabilities: {
+            fs: { read: [configGlob] },
+            net: { mode: 'none' },
+            timeMs: 10_000,
+          },
+        },
         handler: async () => {
           const cfg = await readProvidersConfig(configPath);
           return {
@@ -496,10 +517,17 @@ export function buildProviderAdminPlugin(
       defineTool({
         name: 'provider_remove',
         description:
-          'Remove a previously-added provider from ~/.moxxy/providers.json and detach it from the live session. ' +
+          'Remove a previously-added provider from the unified config (plugins.provider.items) and detach it from the live session. ' +
           'Does NOT delete the stored API key — call vault_delete name=<NAME>_API_KEY separately if you also want to drop the credential.',
         inputSchema: removeProviderInput,
         permission: { action: 'prompt' },
+        isolation: {
+          capabilities: {
+            fs: { read: [configGlob], write: [configGlob] },
+            net: { mode: 'none' },
+            timeMs: 30_000,
+          },
+        },
         handler: async ({ name }) => {
           // Removing the ACTIVE provider leaves the registry with active=null, so
           // the next turn fails with a "no active provider" error. Mirror the
@@ -518,10 +546,10 @@ export function buildProviderAdminPlugin(
             }
             engine.ownNames.delete(name);
             const note = removingActive
-              ? `Removed "${name}" from providers.json and detached from session. ` +
+              ? `Removed "${name}" from the stored providers and detached from session. ` +
                 `WARNING: "${name}" was the ACTIVE provider — the session now has NO active provider ` +
                 `and the next turn will fail until you switch with the /provider command.`
-              : `Removed "${name}" from providers.json and detached from session.`;
+              : `Removed "${name}" from the stored providers and detached from session.`;
             return { ok: true, name, removedActive: removingActive, note };
           });
         },
@@ -537,6 +565,15 @@ export function buildProviderAdminPlugin(
           '{ ok: false, message } with the vendor error verbatim.',
         inputSchema: testProviderInput,
         permission: { action: 'prompt' },
+        // Probes a caller-supplied endpoint (`baseURL`/v1/models) — the host
+        // is genuinely dynamic. The key comes via the brokered ctx.getSecret,
+        // not from fs or env.
+        isolation: {
+          capabilities: {
+            net: { mode: 'any' },
+            timeMs: 60_000,
+          },
+        },
         // The plaintext key is resolved HERE, at call time, via ctx.getSecret —
         // it never appears as tool input/output, so it stays out of the model
         // context, the runner session log, and the desktop NDJSON log.
@@ -571,7 +608,7 @@ export function buildProviderAdminPlugin(
         try {
           cfg = await readProvidersConfig(configPath);
         } catch (err) {
-          log?.warn('provider-admin: failed to read providers.json', {
+          log?.warn('provider-admin: failed to read stored providers', {
             err: err instanceof Error ? err.message : String(err),
           });
           return;
@@ -655,3 +692,6 @@ export const providerAdminPlugin: Plugin = (() => {
     },
   });
 })();
+
+// Discovery entry: `createPluginLoader` requires a default Plugin export.
+export default providerAdminPlugin;

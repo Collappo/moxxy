@@ -21,6 +21,14 @@ export {
   type UsageStatsFile,
   type StoredModelUsage,
 } from './usage-stats.js';
+export {
+  loadSkillUsage,
+  mergeSkillUsage,
+  skillsUsagePath,
+  type SkillUsageFile,
+  type SkillUsage,
+  type SkillUsageDelta,
+} from './skill-usage.js';
 export { SkillRegistryImpl } from './registries/skills.js';
 export {
   parseSkillFile,
@@ -57,6 +65,7 @@ export { SynthesizerRegistry } from './registries/synthesizers.js';
 export { EmbedderRegistry } from './registries/embedders.js';
 export { IsolatorRegistry as ContributedIsolatorRegistry } from './registries/isolators.js';
 export { EventStoreRegistry } from './registries/event-stores.js';
+export { ReflectorRegistry } from './registries/reflectors.js';
 export { jsonlEventStore } from './sessions/jsonl-event-store.js';
 export type {
   EventStoreDef,
@@ -78,11 +87,13 @@ export {
   setSessionGroup,
   seedSessionMeta,
   SESSION_META_VERSION,
+  SESSION_SOURCES,
   type SessionMeta,
   type SessionSource,
   type SessionPersistenceOpts,
   type EventPage,
 } from './sessions/persistence.js';
+export { isMoxxyEventShape } from './sessions/event-shape.js';
 export {
   PluginHost,
   PluginRequirementError,

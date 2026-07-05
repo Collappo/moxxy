@@ -1,6 +1,7 @@
 import type React from 'react';
 import { clearUsageStats, readSessionIndex } from '@moxxy/core';
-import { setCategoryDefault } from '@moxxy/config';
+import { loadConfig, setCategoryDefault } from '@moxxy/config';
+import { SETTINGS_KNOBS } from './settings-descriptors.js';
 import type { ClientSession as Session } from '@moxxy/sdk';
 import type { UserPromptAttachment } from '@moxxy/sdk';
 import { isSelectableMode } from '@moxxy/sdk';
@@ -38,6 +39,11 @@ export interface SlashDeps {
    * {@link canSwitchSession}) — `/collab` then degrades to a notice.
    */
   requestCollab?: (goal?: string) => void;
+  /** Open the plugin-setup dialog (SessionView owns the state). */
+  openPluginSetup?: (target: {
+    packageName: string;
+    spec: import('@moxxy/sdk').PluginSetupSpec;
+  }) => void;
 }
 
 export function runSlash(cmd: string, deps: SlashDeps): void {
@@ -143,6 +149,11 @@ export function runSlash(cmd: string, deps: SlashDeps): void {
       return openModePicker(deps, args);
     case 'plugins':
       return openPluginsPicker(deps);
+    case 'settings':
+    case 'config':
+      return openSettingsPicker(deps);
+    case 'setup':
+      return openPluginSetupEntry(deps, args);
     case 'channels':
       deps.setSystemNotice(null);
       deps.setOverlay({ kind: 'channels' });
@@ -191,7 +202,7 @@ function handleClearQueue(deps: SlashDeps): void {
   );
 }
 
-function openModelPicker(deps: SlashDeps): void {
+export function openModelPicker(deps: SlashDeps): void {
   // Build a flat list of all (provider, model) pairs across every
   // registered provider — the user can switch BOTH provider and
   // model in one pick. Grouping is by provider name. Providers whose
@@ -320,6 +331,100 @@ export interface OpenMcpPickerDeps {
   setSystemNotice: (msg: string | null) => void;
 }
 
+/**
+ * `/settings` — the curated config panel. Options come from the pure
+ * SETTINGS_KNOBS table with the CURRENT value as the badge (re-read from
+ * disk on every open so external edits show up). Selection semantics live
+ * in picker-handlers: booleans toggle, enums cycle, links open the matching
+ * picker, readonly rows explain where to edit.
+ */
+export interface OpenSettingsPickerDeps {
+  session: Session;
+  setPicker: (p: Picker) => void;
+  setSystemNotice: (msg: string | null) => void;
+}
+
+/**
+ * `/setup [package]` — (re)configure an installed plugin's declared setup
+ * step in place: with an argument opens its dialog directly (catalog ids
+ * accepted); bare `/setup` lists installed plugins that declare one. Also
+ * the recovery path for a required setup skipped at init (completing it
+ * re-enables the package).
+ */
+export function openPluginSetupEntry(deps: SlashDeps, arg = ''): void {
+  const admin = deps.session.pluginsAdmin;
+  if (!admin?.setupSpec || !deps.openPluginSetup) {
+    deps.setSystemNotice('plugin setup is not available on this session — run `moxxy init` instead');
+    return;
+  }
+  const target = arg.trim();
+  void (async () => {
+    try {
+      if (target) {
+        const pkg =
+          admin.catalog().find((e) => e.id === target || e.packageName === target)?.packageName ??
+          target;
+        const spec = await admin.setupSpec!(pkg);
+        if (!spec) {
+          deps.setSystemNotice(`${pkg} is not installed or declares no setup step`);
+          return;
+        }
+        deps.openPluginSetup!({ packageName: pkg, spec });
+        return;
+      }
+      // Bare /setup: list installed plugins that declare a setup step.
+      const installed = admin.loaded().filter((pl) => pl.installed);
+      const withSpecs: ListPickerOption[] = [];
+      for (const pl of installed) {
+        const spec = await admin.setupSpec!(pl.name).catch(() => null);
+        if (spec) {
+          withSpecs.push({
+            id: pl.name,
+            label: pl.name,
+            description: truncate(spec.title, 66),
+            ...(spec.required ? { badge: 'required', badgeColor: 'yellow' } : {}),
+          });
+        }
+      }
+      if (withSpecs.length === 0) {
+        deps.setSystemNotice('no installed plugin declares a setup step');
+        return;
+      }
+      deps.setPicker({ kind: 'plugin-setup-pick', title: 'Configure a plugin', options: withSpecs });
+    } catch (err) {
+      deps.setSystemNotice(
+        `setup failed to open: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  })();
+}
+
+export function openSettingsPicker(deps: OpenSettingsPickerDeps): void {
+  void (async () => {
+    try {
+      const { config } = await loadConfig({ cwd: process.cwd() });
+      const options: ListPickerOption[] = SETTINGS_KNOBS.map((k) => {
+        const badge = k.kind === 'link' ? 'open ›' : k.current(config);
+        return {
+          id: k.id,
+          label: k.label,
+          description: truncate(k.description, 66),
+          ...(badge ? { badge, badgeColor: k.kind === 'readonly' ? 'gray' : 'cyan' } : {}),
+        };
+      });
+      deps.setPicker({
+        kind: 'settings',
+        title: 'Settings — enter toggles · esc closes',
+        options,
+      });
+    } catch (err) {
+      deps.setSystemNotice(
+        `failed to load config: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  })();
+}
+
 export function openMcpPicker(deps: OpenMcpPickerDeps): void {
   // Open a server picker. Selecting one opens the action picker
   // (enable/disable/remove/cancel). MCP catalog state lives in
@@ -374,6 +479,7 @@ const CATEGORY_LABELS: Record<string, string> = {
   tunnelProvider: 'Tunnels',
   isolator: 'Isolators',
   eventStore: 'Storage',
+  reflector: 'Learning loop',
   channel: 'Channels',
 };
 
@@ -504,9 +610,11 @@ export function openPluginsPicker(deps: OpenPluginsPickerDeps): void {
 function startGoal(deps: SlashDeps, arg: string): void {
   const objective = arg.trim();
   const GOAL_MODE = 'goal';
-  // The mode is registered globally; if it's somehow absent, say so rather
+  // Missing mode: offer install-on-first-use when the catalog provides it
+  // (post-install the original /goal line re-runs); otherwise say so rather
   // than silently arming yolo with no behavior change.
   if (!deps.session.modes.list().some((m) => m.name === GOAL_MODE)) {
+    if (offerModeInstall(deps, GOAL_MODE, objective ? `/goal ${objective}` : '/goal')) return;
     deps.setSystemNotice('goal mode is not available (mode-goal plugin not loaded)');
     return;
   }
@@ -542,6 +650,13 @@ function startGoal(deps: SlashDeps, arg: string): void {
  */
 function startCollab(deps: SlashDeps, arg: string): void {
   const objective = arg.trim();
+  // The coordinator runner needs the collaborative mode package on disk —
+  // when it isn't loaded here it won't be there either. Offer the install.
+  if (!deps.session.modes.list().some((m) => m.name === 'collaborative')) {
+    if (offerModeInstall(deps, 'collaborative', objective ? `/collab ${objective}` : '/collab')) {
+      return;
+    }
+  }
   if (!deps.requestCollab) {
     deps.setSystemNotice(
       'collaboration runs on its own runner and needs an in-place session switch, which isn’t available here (attached to an external `moxxy serve`). Start it from the desktop Collaborate panel instead.',
@@ -552,7 +667,7 @@ function startCollab(deps: SlashDeps, arg: string): void {
   deps.requestCollab(objective || undefined);
 }
 
-function openModePicker(deps: SlashDeps, arg = ''): void {
+export function openModePicker(deps: SlashDeps, arg = ''): void {
   const all = deps.session.modes.list();
   // Special modes (e.g. the collaborative system, entered via /collab) are never
   // listed or name-switched here — see ModeDef.special / isSelectableMode.
@@ -588,6 +703,7 @@ function openModePicker(deps: SlashDeps, arg = ''): void {
       }
       return;
     }
+    if (offerModeInstall(deps, target, `/mode ${target}`)) return;
     deps.setSystemNotice(
       `no mode named "${arg.trim()}". Available: ${modes.map((m) => m.name).join(', ')}`,
     );
@@ -599,7 +715,66 @@ function openModePicker(deps: SlashDeps, arg = ''): void {
     current: s.name === deps.modeName,
     ...(s.description ? { description: truncate(s.description, 80) } : {}),
   }));
+  // Append catalog-provided modes whose package isn't installed, badged so
+  // picking one flows through install-confirm → install → `/mode <name>`.
+  const registered = new Set(all.map((m) => m.name));
+  for (const { entry, name } of installableCatalogModes(deps, registered)) {
+    options.push({
+      id: `install::${name}`,
+      label: name,
+      description: truncate(entry.description, 66),
+      badge: 'installs on first use',
+      badgeColor: 'yellow',
+    });
+  }
   deps.setPicker({ kind: 'mode', title: 'Switch mode', options });
+}
+
+/** Catalog entries providing a mode that isn't registered (install candidates). */
+function installableCatalogModes(
+  deps: SlashDeps,
+  registered: ReadonlySet<string>,
+): Array<{ entry: { id: string; description: string; packageName: string }; name: string }> {
+  const admin = deps.session.pluginsAdmin;
+  if (!admin?.install) return [];
+  const out: Array<{ entry: { id: string; description: string; packageName: string }; name: string }> = [];
+  for (const entry of admin.catalog()) {
+    for (const p of entry.provides ?? []) {
+      if (p.category === 'mode' && !registered.has(p.name)) {
+        out.push({ entry: { id: entry.id, description: entry.label, packageName: entry.packageName }, name: p.name });
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * Open the install-confirm picker for a mode the catalog can provide.
+ * Returns false when the session can't install or the catalog doesn't know
+ * the mode — callers fall back to their plain notice.
+ */
+function offerModeInstall(deps: SlashDeps, modeName: string, rerun: string): boolean {
+  const admin = deps.session.pluginsAdmin;
+  if (!admin?.install) return false;
+  const entry = admin
+    .catalog()
+    .find((e) => e.provides?.some((p) => p.category === 'mode' && p.name === modeName));
+  if (!entry) return false;
+  deps.setPicker({
+    kind: 'install-confirm',
+    title: `${modeName} mode isn't installed`,
+    catalogId: entry.id,
+    rerun,
+    options: [
+      {
+        id: 'install',
+        label: `Install ${entry.packageName}`,
+        description: 'npm install into ~/.moxxy/plugins, then continue where you left off',
+      },
+      { id: 'cancel', label: 'Cancel', description: 'close without installing' },
+    ],
+  });
+  return true;
 }
 
 /**

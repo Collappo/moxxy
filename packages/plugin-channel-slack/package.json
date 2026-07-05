@@ -1,8 +1,28 @@
 {
   "name": "@moxxy/plugin-channel-slack",
-  "private": true,
-  "version": "0.0.5",
+  "version": "0.27.0",
   "description": "Slack bot channel for moxxy. Ingests Slack Events API over the proxy relay, drives the Session, and streams threaded replies. Autonomous allow-list permission model (no human in the loop).",
+  "keywords": [
+    "moxxy",
+    "agent",
+    "channel",
+    "slack",
+    "bot"
+  ],
+  "homepage": "https://moxxy.ai",
+  "bugs": {
+    "url": "https://github.com/moxxy-ai/moxxy/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/moxxy-ai/moxxy.git",
+    "directory": "packages/plugin-channel-slack"
+  },
+  "author": "Michal Makowski <michal.makowski97@gmail.com>",
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -33,10 +53,32 @@
         "name": "@moxxy/plugin-vault",
         "hint": "slack resolves the vault from the service registry for its bot token + signing secret + pairing; @moxxy/plugin-vault must load first"
       }
-    ]
+    ],
+    "setup": {
+      "title": "Slack bot",
+      "description": "Create an app at https://api.slack.com/apps → install it to your workspace and copy the Bot User OAuth Token (xoxb-…) plus the Signing Secret (Basic Information). Events arrive over an HTTP ingest URL — after setup, `moxxy slack pair` prints the Request URL to paste into Event Subscriptions; pairing is trust-on-first-@mention.",
+      "fields": [
+        {
+          "key": "botToken",
+          "label": "Bot User OAuth Token (xoxb-…)",
+          "kind": "secret",
+          "vaultKey": "slack_bot_token",
+          "required": true,
+          "placeholder": "xoxb-…"
+        },
+        {
+          "key": "signingSecret",
+          "label": "Signing Secret",
+          "kind": "secret",
+          "vaultKey": "slack_signing_secret",
+          "required": true
+        }
+      ]
+    }
   },
   "dependencies": {
     "@clack/prompts": "catalog:",
+    "@moxxy/channel-kit": "workspace:*",
     "@moxxy/config": "workspace:*",
     "@moxxy/core": "workspace:*",
     "@moxxy/plugin-tunnel-proxy": "workspace:*",

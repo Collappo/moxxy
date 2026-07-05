@@ -1,5 +1,64 @@
 # @moxxy/plugin-usage-stats
 
+## 0.27.0
+
+### Patch Changes
+
+- b2a5fba: Aggregate skill usage into `~/.moxxy/skills/.meta/usage.json` and surface it.
+
+  A new best-effort store in `@moxxy/core` (`skill-usage.ts`) records per-skill-name
+  `invocations` counts plus first-`createdAt` / latest-`lastInvokedAt` timestamps.
+  `@moxxy/plugin-usage-stats` folds this run's `skill_invoked` / `skill_created`
+  events past the same resume/`/new` seq boundary it already uses for token usage
+  and merges the delta on shutdown (token behavior unchanged). `moxxy skills list`
+  gains a dim `used` column and the `/skills` TUI panel shows a right-aligned `×N`
+  badge.
+
+  Known limitation: `skill_invoked` is only emitted by the `load_skill` tool today
+  (reason `load_skill_tool`), so counts reflect explicit `load_skill` calls only.
+  When trigger-match / classifier emission lands later, the same file simply starts
+  counting more — no format change.
+
+- Updated dependencies [87aac6d]
+- Updated dependencies [e791484]
+- Updated dependencies [49b1d73]
+- Updated dependencies [6460cc6]
+- Updated dependencies [3b27404]
+- Updated dependencies [0b6f40e]
+- Updated dependencies [2cff46b]
+- Updated dependencies [2cef8e1]
+- Updated dependencies [98f545c]
+- Updated dependencies [ee2967d]
+- Updated dependencies [2a35357]
+- Updated dependencies [67a3387]
+- Updated dependencies [b2a5fba]
+- Updated dependencies [be28d55]
+  - @moxxy/core@0.27.0
+  - @moxxy/sdk@0.27.0
+
+## 0.26.0
+
+### Minor Changes
+
+- 386e526: Slim wave, batch 1: seven plugins move out of the CLI binary and install on
+  demand from npm — `@moxxy/mode-goal`, `@moxxy/mode-deep-research` (now
+  npm-depends on `@moxxy/plugin-subagents` so one install brings both),
+  `@moxxy/plugin-subagents`, `@moxxy/plugin-oauth`,
+  `@moxxy/plugin-computer-control`, `@moxxy/plugin-channel-http`,
+  `@moxxy/plugin-usage-stats`. All are in the installable catalog (the
+  `/plugins` picker installs them one-keystroke; `/goal`, `/collab` and `/mode`
+  offer the install at point of use), and `moxxy init` installs a picked
+  non-bundled default mode during setup so the written config never floors
+  back on first boot. New `scripts/e2e-slim-install.mjs` fresh-install smoke.
+
+### Patch Changes
+
+- Updated dependencies [8c70f3c]
+- Updated dependencies [8c70f3c]
+- Updated dependencies [ce56ef6]
+  - @moxxy/sdk@0.26.0
+  - @moxxy/core@0.26.0
+
 ## 0.0.43
 
 ### Patch Changes

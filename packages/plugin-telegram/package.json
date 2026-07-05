@@ -1,8 +1,28 @@
 {
   "name": "@moxxy/plugin-telegram",
-  "private": true,
-  "version": "0.1.4",
+  "version": "0.27.0",
   "description": "Telegram channel for moxxy via grammy. Treats Telegram chats as a bidirectional channel: prompts in, assistant + tool prompts out, inline-keyboard permission flow, QR deep-link chat pairing.",
+  "keywords": [
+    "moxxy",
+    "agent",
+    "channel",
+    "telegram",
+    "bot"
+  ],
+  "homepage": "https://moxxy.ai",
+  "bugs": {
+    "url": "https://github.com/moxxy-ai/moxxy/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/moxxy-ai/moxxy.git",
+    "directory": "packages/plugin-telegram"
+  },
+  "author": "Michal Makowski <michal.makowski97@gmail.com>",
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -33,10 +53,26 @@
         "name": "@moxxy/plugin-vault",
         "hint": "telegram resolves the vault from the service registry for its bot token + pairing; @moxxy/plugin-vault must load first"
       }
-    ]
+    ],
+    "setup": {
+      "title": "Telegram bot",
+      "description": "Create a bot with @BotFather in Telegram (/newbot) and paste its token below. It goes into the encrypted vault. Pairing happens afterwards via QR (`moxxy telegram` → pair).",
+      "fields": [
+        {
+          "key": "botToken",
+          "label": "Bot token",
+          "kind": "secret",
+          "vaultKey": "telegram_bot_token",
+          "required": true,
+          "placeholder": "123456789:AA…",
+          "description": "From @BotFather → /newbot (or /token for an existing bot)."
+        }
+      ]
+    }
   },
   "dependencies": {
     "@clack/prompts": "catalog:",
+    "@moxxy/channel-kit": "workspace:*",
     "@moxxy/config": "workspace:*",
     "@moxxy/core": "workspace:*",
     "@moxxy/plugin-vault": "workspace:*",

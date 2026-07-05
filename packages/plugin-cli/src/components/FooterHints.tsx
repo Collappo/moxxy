@@ -27,7 +27,7 @@ const HINTS: Record<FooterHintMode, ReadonlyArray<Hint>> = {
     { key: '/help', action: 'commands', priority: 2 },
     { key: 'Esc', action: 'clear / cancel', priority: 3 },
     { key: '⇧Enter', action: 'newline', priority: 4 },
-    { key: '^B', action: 'toggle skills', priority: 5 },
+    { key: '^O', action: 'tool detail', priority: 5 },
   ],
   picker: [
     { key: '↑↓', action: 'navigate', priority: 1 },
@@ -54,6 +54,8 @@ const VOICE_HINT: Hint = { key: '^R', action: 'voice', priority: 2 };
  * even at 40 columns.
  */
 export const FooterHints: React.FC<FooterHintsProps> = ({ mode = 'default', voiceReady = false }) => {
+  // `tui.hints: false` in config (projected to env by the CLI launcher).
+  if (process.env.MOXXY_TUI_HINTS === '0') return null;
   const width = process.stdout.columns ?? 80;
   const base = HINTS[mode];
   const all = voiceReady && (mode === 'default' || mode === 'boot') ? [...base, VOICE_HINT] : base;

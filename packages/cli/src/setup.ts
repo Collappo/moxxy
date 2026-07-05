@@ -10,10 +10,10 @@ import {
   silentLogger,
 } from '@moxxy/core';
 import type { Plugin } from '@moxxy/sdk';
-import { buildConfigPlugin, loadDisabledProviders } from '@moxxy/config';
+import { buildConfigPlugin, loadConfig as loadMergedConfig, loadDisabledProviders } from '@moxxy/config';
 import { BUILTIN_SKILLS_DIR_RESOLVED } from './setup/builtin-skills-dir.js';
 import { buildVaultPlugin } from '@moxxy/plugin-vault';
-import { buildMemoryPlugin } from '@moxxy/plugin-memory';
+import type { MemoryStore } from '@moxxy/plugin-memory';
 import { buildSessionConfigApplier } from './config-applier.js';
 import { loadRawConfig, resolveConfigPlaceholders } from './setup/load-config.js';
 import { selectEmbedder } from './setup/embedder.js';
@@ -23,6 +23,7 @@ import { buildSchedulerRunner } from './setup/scheduler-runner.js';
 import { buildWebhookRunner } from './setup/webhook-runner.js';
 import { registerPlugins } from './setup/register-plugins.js';
 import { activateProvider } from './setup/activate-provider.js';
+import { buildProviderSetupView } from './setup/provider-setup.js';
 import {
   applyPluginsTree,
   assertCriticalFloors,
@@ -100,13 +101,6 @@ export async function setupSessionWithConfig(opts: SetupOptions): Promise<SetupR
     secretResolver: (name) => vault.get(name),
   });
 
-  // Built AFTER the session so it can pull the registry-selected embedder
-  // lazily — the embedder isn't chosen until plugins have registered (see
-  // selectEmbedder below). A null active embedder → keyword recall.
-  const { plugin: memoryPlugin, store: memory } = buildMemoryPlugin({
-    embedder: () => session.embedders.tryGetActive(),
-  });
-
   // Build the builtin list first WITHOUT the config plugin so we can pass the
   // whole list to the ConfigApplier (used for hot-toggle of plugin enable/disable).
   const schedulerRunner = buildSchedulerRunner(session);
@@ -116,13 +110,16 @@ export async function setupSessionWithConfig(opts: SetupOptions): Promise<SetupR
     rawConfig,
     vault,
     vaultPlugin,
-    memory,
-    memoryPlugin,
     schedulerRunner,
     webhookRunner,
     disabledPackages,
     logger,
   });
+
+  // ONE applier instance shared by the config_set/config_reload tools AND the
+  // session's configAdmin view (the TUI /settings panel) — both surfaces
+  // live-apply through identical logic.
+  const configApplier = buildSessionConfigApplier(session, config, builtinsCore, disabledPackages);
 
   const builtins: Array<{ name: string; plugin: Plugin }> = [
     ...builtinsCore,
@@ -130,10 +127,19 @@ export async function setupSessionWithConfig(opts: SetupOptions): Promise<SetupR
       name: '@moxxy/plugin-config',
       plugin: buildConfigPlugin({
         cwd: opts.cwd,
-        applier: buildSessionConfigApplier(session, config, builtinsCore, disabledPackages),
+        applier: configApplier,
       }),
     },
   ];
+
+  // Re-read + live-apply seam for UI surfaces. A RemoteSession leaves it
+  // undefined; the /settings panel then reports "applies on restart".
+  session.configAdmin = {
+    apply: async () => {
+      const { config: fresh } = await loadMergedConfig({ cwd: opts.cwd });
+      return configApplier(fresh);
+    },
+  };
 
   const pluginRegistration = await registerPlugins(session, config, builtins, opts.cwd, logger);
   progress({
@@ -183,6 +189,11 @@ export async function setupSessionWithConfig(opts: SetupOptions): Promise<SetupR
     progress,
     logger,
   });
+
+  // In-session provider onboarding (install / key entry / OAuth) — backs the
+  // TUI's inline connect dialog and shares its implementation with the init
+  // wizard. Attached after activation so readyProviders exists to mark into.
+  session.providerSetup = buildProviderSetupView({ session, vault });
 
   // Apply the manifest's per-category defaults (mode/compactor/cacheStrategy/
   // workflowExecutor/viewRenderer/tunnelProvider) in one table-driven pass. A
@@ -236,6 +247,11 @@ export async function setupSessionWithConfig(opts: SetupOptions): Promise<SetupR
   progress({ kind: 'ready' });
 
   const persistence = attachSessionPersistence(session, opts.cwd, opts.disableSessionPersistence);
+
+  // The memory plugin (when installed/enabled) published its store as the
+  // 'memory' service during onInit; a slim boot without it leaves this
+  // undefined and consumers (doctor) degrade.
+  const memory = session.services.get<MemoryStore>('memory');
 
   return {
     session,

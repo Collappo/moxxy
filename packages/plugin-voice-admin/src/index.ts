@@ -1,4 +1,4 @@
-import { type Session, type SynthesizerRegistry } from '@moxxy/core';
+import type { Session, SynthesizerRegistry } from '@moxxy/core';
 import { definePlugin, defineTool, z, type LifecycleHooks, type Plugin } from '@moxxy/sdk';
 
 /**
@@ -33,7 +33,7 @@ export const voiceAdminPlugin: Plugin = (() => {
   return makeVoiceAdminPlugin(() => {
     if (!reg) {
       throw new Error(
-        '@moxxy/voice-admin: the "synthesizers" registry is unavailable — the host must publish it',
+        '@moxxy/plugin-voice-admin: the "synthesizers" registry is unavailable — the host must publish it',
       );
     }
     return reg;
@@ -58,7 +58,7 @@ function makeVoiceAdminPlugin(
       .filter((n) => n !== 'system'),
   ];
   return definePlugin({
-    name: '@moxxy/voice-admin',
+    name: '@moxxy/plugin-voice-admin',
     version: '0.0.1',
     ...(hooks ? { hooks } : {}),
     tools: [
@@ -70,6 +70,8 @@ function makeVoiceAdminPlugin(
           'plugin synthesizer active).',
         inputSchema: z.object({}),
         permission: { action: 'allow' },
+        // Pure registry view — no fs / net / subprocess.
+        isolation: { capabilities: { net: { mode: 'none' }, timeMs: 10_000 } },
         handler: () => ({
           active: getSynths().getActiveName() ?? 'system',
           available: voiceNames(),
@@ -94,6 +96,9 @@ function makeVoiceAdminPlugin(
         // network call happens at set_voice time — the first read-aloud builds
         // it under the same vault/network gates a registered plugin already has.
         permission: { action: 'allow' },
+        // Flips the registry's active slot only — the synthesizer is not
+        // built here (see the permission note above), so no secret/net work.
+        isolation: { capabilities: { net: { mode: 'none' }, timeMs: 10_000 } },
         handler: ({ synthesizer }) => {
           // Treat 'system' as the OS-voice sentinel only when no real
           // synthesizer claims that name. A backend literally named 'system'
@@ -115,3 +120,6 @@ function makeVoiceAdminPlugin(
     ],
   });
 }
+
+// Discovery entry: `createPluginLoader` requires a default Plugin export.
+export default voiceAdminPlugin;

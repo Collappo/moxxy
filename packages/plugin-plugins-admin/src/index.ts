@@ -18,18 +18,45 @@ import {
 import { buildSearchPluginsTool } from './search.js';
 
 export {
+  buildCapabilityReport,
   buildInstallPluginTool,
   buildUninstallPluginTool,
   installPluginPackage,
+  installPluginPackagePinned,
   removePluginPackage,
   userPluginsDir,
+  type InstallCapabilityReport,
   type InstallPluginDeps,
   type InstallPluginPackageOptions,
   type InstallPluginPackageResult,
+  type PinnedInstallOptions,
   type PluginSnapshot,
   type RemovePluginPackageOptions,
   type RemovePluginPackageResult,
 } from './install.js';
+
+export {
+  describeCapabilitySurface,
+  summarizeCapabilitySurface,
+  undeclaredToolsWarning,
+  type CapabilitySurfaceRow,
+} from './capability-copy.js';
+
+export { pinFirstPartySpec } from './pin.js';
+
+export {
+  applySetupValues,
+  listPluginSetups,
+  readPluginSetup,
+  setupFieldVaultKey,
+  type ApplySetupOptions,
+  type ApplySetupResult,
+  type SetupFieldValue,
+  type SetupSpecVault,
+} from './setup-spec.js';
+export type { PluginSetupField, PluginSetupSpec } from '@moxxy/sdk';
+
+export { diffSnapshot, packageNameFromSpec, SNAPSHOT_KINDS } from './shared.js';
 
 export {
   buildDisablePluginTool,
@@ -49,6 +76,30 @@ export {
   type PluginSearchResult,
   type FetchLike,
 } from './search.js';
+
+// Signed plugin-registry v1 client: Ed25519-verified index fetch + cache +
+// fallback, install-source resolution with signed version pins, and the
+// capability-manifest comparison (see registry.ts for the format spec).
+export {
+  checkCapabilityManifest,
+  DEFAULT_REGISTRY_URL,
+  fetchSignedRegistry,
+  parseRegistryIndex,
+  REGISTRY_CACHE_TTL_MS,
+  REGISTRY_INDEX_VERSION,
+  resolveInstallSource,
+  verifyRegistryIndex,
+  type CapabilityManifestCheck,
+  type FetchSignedRegistryOptions,
+  type PluginRegistryEntry,
+  type PluginRegistryIndex,
+  type RegistryFallbackReason,
+  type RegistryFetchLike,
+  type RegistryResultEntry,
+  type ResolvedInstallSource,
+  type SignedRegistryResult,
+} from './registry.js';
+export { REGISTRY_PUBLIC_KEY } from './registry-key.js';
 
 // Enable/disable + category-default persistence (formerly
 // @moxxy/plugin-marketplace/config-state).
@@ -70,6 +121,7 @@ export {
   buildInstallSpec,
   buildPluginActionOptions,
   buildPluginCatalogOptions,
+  findCatalogEntryForContribution,
   formatPluginCatalogStatus,
   INSTALLABLE_PLUGIN_CATALOG,
   resolveCatalogEntry,
@@ -103,6 +155,10 @@ export interface BuildPluginsAdminOpts {
   readonly categories: CategoryDefaultsDeps['categories'];
   /** Persist + apply a category default swap (the `set_default` tool). */
   readonly setCategoryDefault: CategoryDefaultsDeps['setCategoryDefault'];
+  /** Host CLI version — pins bare `@moxxy/*` installs (see {@link InstallPluginDeps}). */
+  readonly cliVersion?: string;
+  /** Live tool isolation lookup for the install capability report (see {@link InstallPluginDeps}). */
+  readonly toolIsolation?: InstallPluginDeps['toolIsolation'];
 }
 
 /**
@@ -113,7 +169,12 @@ export interface BuildPluginsAdminOpts {
  * plugin set.
  */
 export function buildPluginsAdminPlugin(opts: BuildPluginsAdminOpts): Plugin {
-  const installDeps: InstallPluginDeps = { reload: opts.reload, snapshot: opts.snapshot };
+  const installDeps: InstallPluginDeps = {
+    reload: opts.reload,
+    snapshot: opts.snapshot,
+    ...(opts.cliVersion ? { cliVersion: opts.cliVersion } : {}),
+    ...(opts.toolIsolation ? { toolIsolation: opts.toolIsolation } : {}),
+  };
   const toggleDeps: PluginToggleDeps = { setEnabled: opts.setEnabled, snapshot: opts.snapshot };
   const defaultsDeps: CategoryDefaultsDeps = {
     categories: opts.categories,

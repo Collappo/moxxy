@@ -10,6 +10,7 @@ import { StatusLine } from '../components/StatusLine.js';
 import { estimateContextTokens } from '../context-estimate.js';
 import {
   buildSlashSuggestions,
+  parseTuiKeyOverrides,
   clearTerminalScreen,
   getModeBadge,
   getModeName,
@@ -24,7 +25,7 @@ import { useTurnRunner } from './use-turn-runner.js';
 import { usePermissionQueue } from './use-permission-queue.js';
 import { useGlobalHotkeys } from './use-global-hotkeys.js';
 import { useVoiceInput } from './use-voice-input.js';
-import { makePickerHandler } from './picker-handlers.js';
+import { applyProviderModelSwitch, makePickerHandler } from './picker-handlers.js';
 import { runSlash } from './run-slash.js';
 import { OverlayOrNotice } from './OverlayOrNotice.js';
 import { InteractiveZone } from './InteractiveZone.js';
@@ -125,8 +126,11 @@ export const SessionView: React.FC<SessionViewProps> = ({
   // Hotkeys that need to reach inside PromptInput. Routed through
   // parse-input.ts since Ink's useInput stops firing once the editor
   // owns the stdin stream (data-mode flowing vs. readable-mode read()).
+  // Ctrl+<letter> assignments honor `tui.keys` overrides (env-projected by
+  // the launcher); the voice key stays fixed on 'r'.
+  const tuiKeys = parseTuiKeyOverrides(process.env.MOXXY_TUI_KEYS);
   const commandHotkeys: Record<string, () => void> = {
-    t: () => {
+    [tuiKeys.forceSend]: () => {
       const moved = turn.forceSendFirst();
       setSystemNotice(
         moved
@@ -134,13 +138,13 @@ export const SessionView: React.FC<SessionViewProps> = ({
           : 'queue: nothing queued to force-send',
       );
     },
-    b: () => {
+    [tuiKeys.dropQueued]: () => {
       const dropped = turn.dropFirst();
       setSystemNotice(
         dropped ? 'queue: dropped the first queued message' : 'queue: nothing to drop',
       );
     },
-    o: () => {
+    [tuiKeys.toggleTools]: () => {
       setExpandToolOutputs((e) => {
         const next = !e;
         setSystemNotice(
@@ -206,6 +210,34 @@ export const SessionView: React.FC<SessionViewProps> = ({
 
   const slashSuggestions = React.useMemo(() => buildSlashSuggestions(session), [session]);
 
+  // Guards against a second picker-driven npm install while one is running.
+  // npm itself is mutex-serialized host-side; this is purely UX (one clear
+  // "still installing" notice instead of a silently queued second install).
+  const installInFlightRef = React.useRef(false);
+
+  // Inline provider connect: `/model` on an unconnected provider opens the
+  // ProviderConnectDialog (install + key entry / OAuth) instead of telling
+  // the user to quit and run `moxxy init`. Carries the pending model pick so
+  // a successful connect completes the exact switch the user asked for.
+  const [providerConnect, setProviderConnect] = React.useState<{
+    providerId: string;
+    modelId: string;
+  } | null>(null);
+
+  // Post-install / /setup plugin-configuration dialog. Carries an optional
+  // continuation (install-confirm's slash rerun waits for configuration).
+  const [pluginSetup, setPluginSetup] = React.useState<{
+    packageName: string;
+    spec: import('@moxxy/sdk').PluginSetupSpec;
+    then?: () => void;
+  } | null>(null);
+
+  // Late-bound so the picker handler (memoized above handleSubmit's
+  // declaration) can re-dispatch a slash line through the normal submit path
+  // — used by install-confirm to re-run the command that hit the missing
+  // capability once its package is installed.
+  const rerunSlashRef = React.useRef<(line: string) => void>(() => undefined);
+
   const handlePickerSelect = React.useMemo(
     () =>
       makePickerHandler({
@@ -215,6 +247,10 @@ export const SessionView: React.FC<SessionViewProps> = ({
         setSystemNotice,
         setActiveModelOverride,
         refreshMcpStatus,
+        installInFlightRef,
+        openProviderConnect: setProviderConnect,
+        openPluginSetup: setPluginSetup,
+        rerunSlash: (line) => rerunSlashRef.current(line),
         ...(onSwitchSession ? { requestSessionSwitch: onSwitchSession } : {}),
       }),
     [session, providerName, refreshMcpStatus, onSwitchSession],
@@ -282,6 +318,12 @@ export const SessionView: React.FC<SessionViewProps> = ({
     }
   };
 
+  // A cancelled REQUIRED setup mirrors init's skip semantics: applySetup with
+  // no values computes incompleteness and disables the package.
+  const deactivateIncompleteSetup = (packageName: string): void => {
+    void session.pluginsAdmin?.applySetup?.(packageName, {}).catch(() => undefined);
+  };
+
   const handleSubmit = async (text: string): Promise<void> => {
     setSystemNotice(null);
     setOverlay(null);
@@ -347,6 +389,9 @@ export const SessionView: React.FC<SessionViewProps> = ({
 
     await turn.runTurnWith(text, attachments);
   };
+  rerunSlashRef.current = (line: string) => {
+    void handleSubmit(line);
+  };
 
   // Hand off the prompt the user typed on the splash screen. Fires
   // once after mount — `firedInitial` guards against re-fires if the
@@ -405,6 +450,58 @@ export const SessionView: React.FC<SessionViewProps> = ({
         pendingPermissionDepth={Math.max(0, permissions.pendingPermissions.length - 1)}
         pendingApproval={pendingApproval}
         picker={picker}
+        pluginSetup={pluginSetup}
+        onPluginSetupFinish={(values) => {
+          const target = pluginSetup;
+          setPluginSetup(null);
+          if (!target) return;
+          const after = target.then;
+          if (values === null) {
+            if (target.spec.required) {
+              deactivateIncompleteSetup(target.packageName);
+              setSystemNotice(
+                `setup cancelled — ${target.packageName} stays disabled until configured (/setup ${target.packageName})`,
+              );
+            } else {
+              setSystemNotice(`setup skipped — /setup ${target.packageName} to configure later`);
+            }
+            after?.();
+            return;
+          }
+          void (async () => {
+            try {
+              const res = await session.pluginsAdmin?.applySetup?.(target.packageName, values);
+              if (res && !res.complete) {
+                setSystemNotice(
+                  `⚠ ${target.packageName} setup incomplete (missing: ${res.missing.join(', ')})` +
+                    (target.spec.required ? ' — package disabled until configured' : ''),
+                );
+              } else {
+                setSystemNotice(`✓ ${target.packageName} configured`);
+              }
+            } catch (err) {
+              setSystemNotice(
+                `setup failed: ${err instanceof Error ? err.message : String(err)}`,
+              );
+            } finally {
+              after?.();
+            }
+          })();
+        }}
+        providerConnect={providerConnect}
+        onProviderConnectSuccess={(note) => {
+          const target = providerConnect;
+          setProviderConnect(null);
+          if (note) setSystemNotice(note);
+          if (target) {
+            void applyProviderModelSwitch(
+              { session, providerName, setSystemNotice, setActiveModelOverride },
+              target.providerId,
+              target.modelId,
+            );
+          }
+        }}
+        onProviderConnectCancel={() => setProviderConnect(null)}
         busy={turn.busy}
         voiceReady={voice.ready}
         voicePhase={voice.phase}
@@ -431,7 +528,16 @@ export const SessionView: React.FC<SessionViewProps> = ({
           resolve(decision);
         }}
         onPickerSelect={handlePickerSelect}
-        onPickerCancel={() => setPicker(null)}
+        onPickerCancel={() => {
+          // Third-party install consent fails CLOSED: dismissing the picker
+          // (ESC / ctrl-c) counts as declining, so the freshly installed
+          // package gets disabled instead of silently staying enabled.
+          if (picker?.kind === 'install-consent') {
+            handlePickerSelect(picker, 'disable');
+            return;
+          }
+          setPicker(null);
+        }}
         onSubmit={handleSubmit}
         onPasteText={images.handlePasteText}
       />

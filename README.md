@@ -82,9 +82,11 @@ npm install -g @moxxy/cli      # or: npx @moxxy/cli init
 ```
 
 ```sh
-moxxy init      # interactive: choose a provider, paste an API key (stored in the vault)
+moxxy onboard   # guided: provider → messaging channel (Discord/Telegram/…) → pairing → background service
 moxxy           # launch the interactive TUI
 ```
+
+Prefer the pieces? `moxxy init` does just the provider wizard; `moxxy <channel>` sets up one channel; `moxxy service install serve` makes it permanent.
 
 One-shot, straight from the shell:
 
@@ -136,13 +138,7 @@ Most agent frameworks lock you in. One LLM provider. One loop topology. One fron
 
 **In your terminal**
 
-<!--
-  TUI DEMO  ▸ replace src with a real GIF.
-  WHAT TO SHOW: the Ink TUI — boot splash → type a prompt → streamed answer
-  with a tool block expanding → the bottom status line (provider · model · context bar).
-  Suggested size: 1200×675. Drop at assets/tui-demo.gif and point src there.
--->
-<img src="https://placehold.co/1200x675/0d1117/c9d1d9.png?text=moxxy+TUI+demo" alt="moxxy TUI" />
+<img src="assets/tui-demo.gif" alt="moxxy TUI — fixing a TODO and verifying with tsc, live" />
 
 `moxxy` — a fast, keyboard-driven terminal UI. Slash commands, live tool output, voice input, `/mode` to switch loops.
 
@@ -410,6 +406,10 @@ CI runs all of the above on every push + PR.
 
 PRs welcome. Open an issue first for anything non-trivial. Per-block author guides in [`.claude/agents/`](.claude/agents/) describe how to write skills, plugins, tools, channels, providers, loop strategies, compactors, and cache strategies.
 
+## 🔒 Security
+
+moxxy is **permission-gated and vault-protected by default, isolatable on demand**: every tool call passes the permission engine, secrets live in an AES-256-GCM vault the model only ever sees as `${vault:KEY}` references, and opt-in capability isolation can sandbox tools per-call. Threat model, hardening guidance, and how to report a vulnerability: [SECURITY.md](SECURITY.md).
+
 ## 📝 License
 
-TBD.
+[MIT](LICENSE).

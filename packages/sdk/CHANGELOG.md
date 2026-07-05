@@ -1,5 +1,134 @@
 # @moxxy/sdk
 
+## 0.27.0
+
+### Minor Changes
+
+- e791484: New Discord channel (`moxxy discord`): a discord.js gateway bot on a dedicated, isolated runner, built on @moxxy/channel-kit. DM code pairing (bot DMs a one-time code, pasted into the terminal wizard), a paired-principal + per-guild-channel allow-list (vault-persisted, managed via local /allow and /deny), edit-throttled streamed replies (≥1200ms, Discord's ~5 edits/5s limit) with 2000-char splitting, button-based permission/approval prompts, session commands published as Discord slash commands, and voice-message transcription. SDK gains the 'discord' SessionSource; the CLI gains the install-on-first-use hint and session-source stamping for it.
+- 49b1d73: Install-time capability consent + third-party requireDeclaration ratchet.
+  Installing a plugin now surfaces the package's combined capability surface
+  (fs globs, net mode/hosts, env, exec commands, time/memory budgets) in
+  human-readable rows shared across every surface. Third-party packages
+  (outside the `@moxxy/` scope) require explicit consent to stay enabled:
+  the TUI opens a fail-closed post-install picker (ESC = decline = disabled),
+  `moxxy plugins install` asks a default-NO confirm on a TTY and headless runs
+  need `--yes` (otherwise the package is left installed but disabled), and the
+  permission-gated `install_plugin` model tool keeps returning the report
+  non-interactively. Undeclared tools are called out loudly — their surface is
+  unknown, not empty. New `security.thirdPartyRequireDeclaration: off|warn|enforce`
+  ('warn' by default while security is enabled) logs a once-per-tool structured
+  warning — or denies with 'enforce' — when a third-party tool has no isolation
+  declaration; unattributed tools (e.g. runtime-attached MCP tools) are exempt.
+  `moxxy security status` prints the new mode.
+- 3b27404: `moxxy onboard` — one guided command from a fresh install to a paired, always-on agent: provider wizard (skipped when configured) → messenger pick from the install catalog → version-pinned install + `moxxy.setup` fields → the channel's own pairing in a new pair-then-return mode (`EXIT_AFTER_PAIR_FLAG` in the SDK, honored by all five pair flows) → a `moxxy serve --all` background unit. Also: channel install hints are now derived from catalog `provides` (telegram/slack/web/http entries gained theirs), Telegram + Slack declare `moxxy.setup` token steps, the `service` catalog's serve unit actually starts channels (`--all`, matching its description), and service units survive Electron-as-node installs (`ELECTRON_RUN_AS_NODE=1` exported into the unit).
+- 0b6f40e: Plugin-declared init hooks: plugins can now ship a declarative setup step at
+  `package.json#moxxy.setup` (title, required flag, typed fields:
+  secret/string/boolean/select). `moxxy init` walks every installed plugin's
+  step — secrets go to the VAULT with a `${vault:NAME}` ref written to the
+  plugin's `options.<key>` (resolved at boot, never plaintext), other kinds
+  persist through the shared schema-validated writer; skipping a
+  `required: true` setup leaves the package DISABLED until configured; re-runs
+  prefill ("enter to keep"). Installing such a plugin (tool or /plugins picker)
+  surfaces `needsSetup` so the user is pointed at the configuration
+  immediately. Proof: the HTTP channel declares its bearer token as a required
+  secret field.
+- 2cff46b: Post-install setup resolves IN the TUI: installing a plugin that declares a
+  `moxxy.setup` step now opens a configuration dialog on the spot (masked
+  secrets, y/n booleans, select lists) instead of pointing at `moxxy init` —
+  values persist through the same shared writer (secrets → vault +
+  `${vault:NAME}` option refs). New `/setup [package]` command (re)configures
+  any installed plugin and re-enables one left disabled by a skipped required
+  setup. New `PluginsAdminView.setupSpec`/`applySetup` seams; the init wizard
+  now shares the exact same `applySetupValues` write path.
+- 2cef8e1: feat(reflector): swappable `reflector` registry category + `@moxxy/reflector-default` learning loop.
+
+  A new single-active registry category — the learning-loop block that watches a finished turn and _proposes_ memory/skill improvements without ever writing silently. Mirrors the `eventStore` category across all 7 layers (config `plugins.reflector.default`, SDK `ReflectorDef`/`ReflectContext`/`ReflectionProposal` contract + plugin slot, core `ReflectorRegistry`, host registry-kind wiring, session field + `services('reflectors')`, CLI apply/category-swap, catalog), but NULLABLE: core seeds no floor, so reflection is opt-in (like transcriber/synthesizer).
+
+  `@moxxy/reflector-default` (discovery-loaded) ships the default `ReflectorDef` `'default'` AND the driver in one plugin. The driver's `onTurnEnd` runs a cheap gate (≥5 tool results OR ≥1 error OR ≥8 mode iterations) under a one-reflection-per-session budget, then fires the reflection FIRE-AND-FORGET so it never blocks or throws into the turn. The reflector does one cheap side-channel LLM pass over a turn digest and returns 0-2 proposals; those are delivered as a ONE-TIME nudge on the next `onBeforeProviderCall`, phrased so the model MAY call `memory_save` / `synthesize_skill` — which still hit their own permission prompts. No silent writes. Graceful no-provider / provider-error skips; `memory_save` and `synthesize_skill` are declared as optional requirements. User-model injection of proposals is deferred to a follow-up PR.
+
+- 98f545c: Package-level capability aggregation: `moxxy security audit --package <name>` shows one package's tools plus their COMBINED capability surface (widest-wins union via the new `aggregateCapabilitySpecs` in the SDK), `--by-package` prints a declared/total rollup per plugin, and `install_plugin` now reports the just-installed package's capability surface (declared/total + undeclared tool names) next to the registration diff. Tool→plugin attribution comes from the plugin host's loaded records (`PluginHost.ownerOfTool`), which also makes the previously-dormant `security.perPlugin` isolator overrides actually route.
+- ee2967d: `/settings` (alias `/config`): a curated in-TUI config panel — reasoning,
+  prompt caching, elision, lazy tools, loop guard, plugin security, TUI theme
+  and footer hints toggle/cycle in place, persist to the user config through
+  the ONE schema-validated comment-preserving writer (new `setConfigValue`,
+  which the `config_set` tool now also delegates to), and live-apply via the
+  new optional `SessionLike.configAdmin` seam (RemoteSession degrades to
+  "applies on restart"). New `tui:` config section (`theme: default|mono`,
+  `hints`, `keys` Ctrl-letter overrides for force-send/drop-queued/
+  expand-tools) projected onto the TUI's env conventions at launch.
+- 67a3387: Signal messenger channel via a signal-cli JSON-RPC sidecar (`@moxxy/plugin-channel-signal`).
+
+  - New installable `@moxxy/plugin-channel-signal`: moxxy joins your Signal
+    account as a LINKED DEVICE (like Signal Desktop) through a `signal-cli`
+    daemon the plugin fully owns — spawned on `start()` (JSON-RPC over a UNIX
+    socket), health-checked (`version` round-trip), and killed on stop with a
+    SIGTERM→SIGKILL grace. `isAvailable` gates on the binary with a pure PATH
+    scan (no JVM spawn) and returns a `brew install signal-cli` hint instead of
+    ever crashing discovery.
+  - Pairing is the linked-device flow: `moxxy channels signal pair` runs
+    `signal-cli link -n moxxy`, renders the `sgnl://linkdevice…` URI as a
+    terminal QR, and stores the account on completion; the desktop Channels
+    panel drives the same window via channel-status (`requestUrl` carries the
+    QR payload, `connected` flips when linked).
+  - Every session-reaching path is gated on a sender allow-list (E.164/uuid,
+    vault key `signal_allowed_senders`); the owner's own "Note to Self" is
+    allowed by default after linking. Sync echoes of the bot's own sends are
+    dropped by sent-timestamp (loop protection), the owner's outbound
+    conversations are never reacted to, and every envelope is zod-validated +
+    size-capped before touching the session. Voice notes transcribe through the
+    session's active Transcriber (20MB cap, install guidance when absent).
+  - Replies stream as buffered paragraph-aligned chunk sends plus a typing
+    indicator instead of FramePump edits — a Signal edit re-delivers the whole
+    body E2E to every device per frame, which burst-rate edits would turn into
+    notification spam and rate-limit bait.
+  - Runs on its own dedicated, isolated runner (like Slack) — a linked device
+    sees all the owner's messages. `SessionSource` gains `'signal'`.
+
+- be28d55: Add a WhatsApp channel via Baileys (`@moxxy/plugin-channel-whatsapp`): QR device-link pairing, a mandatory typed consent gate for the unofficial-API/ban risk, JID allow-list (owner Note-to-Self allowed by default), fromMe-echo loop protection, voice-note transcription, and send-then-edit streaming over a swappable auth-state backend. Runs on its own dedicated isolated runner (`sessionSource: 'whatsapp'`, added to the SDK `SessionSource` union).
+
+### Patch Changes
+
+- 2a35357: refactor(sdk): surface the shared abort-backoff primitives (`sleepWithAbort`, `nextBackoffMs`) directly on the barrel (they were already exported, but buried in the mode-helpers block) and migrate the ad-hoc retry sleeps onto them: the runner's initial-connect retry + SIGTERM grace waits and the desktop supervisor's restart wait / socket poll / kill grace. All schedules and abort semantics preserved — no behavior change.
+
+## 0.26.0
+
+### Minor Changes
+
+- 8c70f3c: Connect a provider without leaving the TUI: picking an unconnected provider
+  in `/model` now opens an inline connect dialog that installs the provider if
+  needed (pinned npm install), collects + validates an API key (stored in the
+  vault, never persisted plaintext), or drives the provider's OAuth sign-in —
+  then completes the exact model switch that was picked. Previously the picker
+  told you to quit and run `moxxy init` / `moxxy login` and restart.
+
+  New optional `SessionLike.providerSetup` (`ProviderSetupView`) seam; the init
+  wizard delegates to the same implementation so wizard and dialog semantics
+  cannot drift (a provider without `validateKey` now accepts the key instead of
+  pseudo-rejecting it). RemoteSession keeps the old guidance notice.
+
+- 8c70f3c: Install-on-first-use: asking for a capability whose package isn't installed
+  now offers to install it at the point of use instead of failing. `/goal` and
+  `/collab` without their mode installed open an install-confirm picker and,
+  after the install lands, re-run the original command; the `/mode` picker
+  lists catalog-provided modes badged "installs on first use"; `set_default`
+  naming an uninstalled contribution throws a typed `PLUGIN_NOT_INSTALLED`
+  error carrying the providing package (so the model tool gets an actionable
+  hint too). Catalog entries gain a `provides` mapping (category + contribution
+  name) that powers the lookup.
+- ce56ef6: The `/plugins` Installable tab now actually installs: selecting a catalog
+  plugin npm-installs it into `~/.moxxy/plugins`, persists the enable,
+  hot-reloads the plugin host, and reports which contributions registered —
+  instead of printing a CLI command to run elsewhere. New optional
+  `PluginsAdminView.install` seam (RemoteSession degrades to the printed
+  command).
+
+  On-demand installs are now version-pinned: bare `@moxxy/*` specs resolve at
+  the CLI's own version across every install path (`install_plugin` tool,
+  `moxxy plugins install`, init's provider/extras steps, the TUI picker), with
+  a 404→latest retry for pins an older CLI can't satisfy. The changeset fixed
+  group widens to all `@moxxy/plugin-*` + `@moxxy/mode-*` so future releases
+  co-version. New `installPluginPackagePinned` / `pinFirstPartySpec` exports.
+
 ## 0.25.0
 
 ## 0.24.1

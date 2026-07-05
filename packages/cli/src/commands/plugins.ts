@@ -1,24 +1,32 @@
 import {
   INSTALLABLE_PLUGIN_CATALOG,
+  buildCapabilityReport,
   buildInstallSpec,
   clearPluginState,
+  describeCapabilitySurface,
   formatPluginCatalogStatus,
-  installPluginPackage,
+  installPluginPackagePinned,
   loadDisabledPackageNames,
+  packageNameFromSpec,
   removePluginPackage,
   resolveCatalogEntry,
   resolveCatalogPackageName,
+  resolveInstallSource,
   searchInstallablePlugins,
   setCategoryDefault,
   setPluginEnabled,
+  undeclaredToolsWarning,
+  type InstallCapabilityReport,
 } from '@moxxy/plugin-plugins-admin';
+import { isFirstPartyPackage } from '@moxxy/sdk';
 import type { ParsedArgv } from '../argv.js';
-import { argvToSetupOptions, bootSession, helpRequested } from '../argv-helpers.js';
+import { argvToSetupOptions, bootSession, hasBoolFlag, helpRequested } from '../argv-helpers.js';
 import { probeSession } from '../setup.js';
 import { isCriticalPackage } from '../setup/critical-packages.js';
 import { printError } from '../errors.js';
 import { runPluginNewCommand } from './plugin-new.js';
 import { colors } from '../colors.js';
+import { cliVersion } from '../version.js';
 import { formatHelp } from './help-format.js';
 
 const HELP = formatHelp({
@@ -30,7 +38,10 @@ const HELP = formatHelp({
       rows: [
         ['list', 'list loaded + disabled plugins and the install catalog'],
         ['search <query>', 'search npm + catalog for installable plugins'],
-        ['install <spec> [--version v] [--ref r]', 'install from catalog id, npm, GitHub, or path'],
+        [
+          'install <spec> [--version v] [--ref r] [--yes]',
+          'install from catalog id, npm, GitHub, or path (--yes: accept a third-party capability surface without prompting)',
+        ],
         ['remove <pkg>', 'uninstall a plugin package'],
         ['enable <pkg>', 'enable (plug in) a plugin'],
         ['disable <pkg>', 'disable (unplug) a plugin — kept installed'],
@@ -164,24 +175,205 @@ async function runInstall(argv: ParsedArgv): Promise<number> {
     printError('plugins install requires a catalog id, npm package, GitHub spec, or path');
     return 2;
   }
-  const spec = buildInstallSpec({
-    target,
-    ...(stringFlag(argv, 'version') ? { version: stringFlag(argv, 'version') } : {}),
-    ...(stringFlag(argv, 'ref') ? { ref: stringFlag(argv, 'ref') } : {}),
-  });
+  const version = stringFlag(argv, 'version');
+  const ref = stringFlag(argv, 'ref');
+  // Explicit --version / --ref always wins: skip the signed-registry lookup
+  // and pass the user's spec through untouched. Otherwise consult the signed
+  // index first (a no-op fallback to the hardcoded catalog while the
+  // maintainer key is unprovisioned) — a signed entry contributes its exact,
+  // signature-covered version as the pin. Pin precedence:
+  // user --version > signed index > cliVersion lockstep > latest.
+  const resolved =
+    version || ref
+      ? undefined
+      : await resolveInstallSource(target);
+  const spec =
+    resolved?.spec ??
+    buildInstallSpec({
+      target,
+      ...(version ? { version } : {}),
+      ...(ref ? { ref } : {}),
+    });
   const entry = resolveCatalogEntry(target);
   try {
-    const result = await installPluginPackage({ packageName: spec });
+    // Bare first-party specs pin to the CLI version (co-published via the
+    // fixed changeset group); a pin that 404s retries latest with a warning.
+    // Explicit --version/--ref specs pass through untouched.
+    const result = await installPluginPackagePinned({
+      packageName: spec,
+      ...(resolved?.pinnedVersion ? { pinnedVersion: resolved.pinnedVersion } : {}),
+      ...(cliVersion() ? { cliVersion: cliVersion()! } : {}),
+      onWarn: (msg) => process.stderr.write(colors.dim(msg) + '\n'),
+    });
+    if (resolved?.origin === 'signed' && resolved.pinnedVersion) {
+      process.stdout.write(
+        colors.dim(`signed registry pin: ${resolved.packageName}@${resolved.pinnedVersion}\n`),
+      );
+    }
     process.stdout.write(
-      `installed ${entry?.packageName ?? spec}\n` +
+      `installed ${resolved?.packageName ?? entry?.packageName ?? spec}\n` +
         `source: ${result.installed}\nplugins dir: ${result.dir}\n` +
         colors.dim('run `moxxy plugins reload` (or restart) to load it\n'),
     );
-    return 0;
+    return await reviewInstallCapabilities(argv, entry?.packageName ?? packageNameFromSpec(spec));
   } catch (err) {
     printError(errorMessage(err));
     return 1;
   }
+}
+
+/**
+ * Post-install capability review + consent. Every install gets its combined
+ * capability surface printed (first-party included — informational). For a
+ * THIRD-PARTY package (outside the `@moxxy/` scope) the surface must be
+ * consented to: on a TTY via an explicit confirm defaulting to NO; headless
+ * only with `--yes` — otherwise the package is left installed but DISABLED.
+ *
+ * The consent is post-hoc by design: npm lifecycle scripts have already run
+ * by the time we can inspect anything, so what consent actually governs is
+ * whether the plugin participates in sessions from here on.
+ */
+async function reviewInstallCapabilities(
+  argv: ParsedArgv,
+  packageName: string | undefined,
+): Promise<number> {
+  if (!packageName) {
+    // Git/path specs don't reveal their package name pre-load; nothing to
+    // attribute tools to, so no automated review (and nothing to disable).
+    process.stdout.write(
+      colors.dim(
+        "couldn't derive a package name from this spec — skipping capability review; " +
+          'inspect it with `moxxy security audit --by-package` after reload\n',
+      ),
+    );
+    return 0;
+  }
+  const probe = await probeInstalledCapabilities(argv, packageName);
+  renderCapabilityReview(packageName, probe);
+  if (isFirstPartyPackage(packageName)) return 0;
+
+  // Third-party: explicit consent required to keep it enabled. Acceptance
+  // writes an explicit enable so a stale `enabled: false` from a previously
+  // declined install of the same package can't survive a consented re-install.
+  if (hasBoolFlag(argv, 'yes')) {
+    await setPluginEnabled(packageName, true);
+    process.stdout.write(colors.dim(`--yes: keeping ${packageName} enabled\n`));
+    return 0;
+  }
+  const tty = process.stdout.isTTY === true && process.stdin.isTTY === true;
+  if (!tty) {
+    await setPluginEnabled(packageName, false);
+    process.stdout.write(
+      `${packageName} is a third-party plugin and was left ${colors.bold('DISABLED')} ` +
+        '(no TTY to ask for consent).\n' +
+        'Re-run with --yes to accept its capability surface, or enable it later with ' +
+        `\`moxxy plugins enable ${packageName}\`.\n`,
+    );
+    return 0;
+  }
+  const { confirm, isCancel } = await import('@clack/prompts');
+  const keep = await confirm({
+    message: `${packageName} is third-party code. Keep it enabled with this capability surface?`,
+    initialValue: false,
+  });
+  if (isCancel(keep) || keep !== true) {
+    await setPluginEnabled(packageName, false);
+    process.stdout.write(
+      `disabled ${packageName} — it stays installed but contributes nothing.\n` +
+        colors.dim(`re-enable it anytime with \`moxxy plugins enable ${packageName}\`\n`),
+    );
+    return 0;
+  }
+  await setPluginEnabled(packageName, true);
+  process.stdout.write(colors.dim(`${packageName} stays enabled\n`));
+  return 0;
+}
+
+interface InstalledCapabilityProbe {
+  readonly toolNames: ReadonlyArray<string>;
+  readonly report?: InstallCapabilityReport;
+}
+
+/**
+ * Boot a throwaway probe session (the freshly installed package loads with
+ * everything else) and collect the package's tools + their combined
+ * capability surface via plugin-host attribution. Null when the probe
+ * itself fails — the review then proceeds with an unknown surface.
+ */
+async function probeInstalledCapabilities(
+  argv: ParsedArgv,
+  packageName: string,
+): Promise<InstalledCapabilityProbe | null> {
+  try {
+    return await probeSession(
+      argvToSetupOptions(argv, {
+        skipKeyPrompt: true,
+        tolerateNoProvider: true,
+        skipProviderActivation: true,
+      }),
+      ({ session }) => {
+        const toolNames = session.tools
+          .list()
+          .map((t) => t.name)
+          .filter((name) => session.pluginHost.ownerOfTool?.(name) === packageName);
+        const report = buildCapabilityReport(
+          toolNames,
+          (name) => session.tools.get(name)?.isolation,
+        );
+        return { toolNames, ...(report ? { report } : {}) };
+      },
+    );
+  } catch {
+    return null;
+  }
+}
+
+function renderCapabilityReview(
+  packageName: string,
+  probe: InstalledCapabilityProbe | null,
+): void {
+  if (!probe) {
+    process.stdout.write(
+      colors.yellow(
+        `couldn't inspect ${packageName}'s capability surface (probe failed) — ` +
+          'review it with `moxxy security audit --package ' +
+          packageName +
+          '`\n',
+      ),
+    );
+    return;
+  }
+  if (!probe.report) {
+    process.stdout.write(
+      colors.dim(
+        `${packageName} registers no tools — no declared capability surface ` +
+          '(providers/modes/channels it contributes still run unconfined)\n',
+      ),
+    );
+    return;
+  }
+  const { report } = probe;
+  process.stdout.write(
+    '\n' +
+      colors.bold('CAPABILITY SURFACE') +
+      colors.dim(` — ${report.declared}/${report.total} tools declared`) +
+      '\n',
+  );
+  const rows = describeCapabilitySurface(report.surface);
+  if (rows.length === 0) {
+    process.stdout.write(colors.dim('  (nothing declared beyond running in-process)\n'));
+  }
+  const labelCol = Math.max(9, ...rows.map((r) => r.label.length));
+  for (const { label, value } of rows) {
+    process.stdout.write(`  ${colors.bold(label.padEnd(labelCol))}  ${colors.dim(value)}\n`);
+  }
+  if (report.undeclaredTools?.length) {
+    process.stdout.write(
+      colors.yellow(`  ⚠ ${undeclaredToolsWarning(report.undeclaredTools.length, report.total)}\n`) +
+        colors.yellow(`    undeclared: ${report.undeclaredTools.join(', ')}\n`),
+    );
+  }
+  process.stdout.write('\n');
 }
 
 async function runRemove(argv: ParsedArgv): Promise<number> {

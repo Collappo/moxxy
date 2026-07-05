@@ -66,6 +66,8 @@ export type {
   LoadedPluginView,
   CategoryView,
   CategoryItemView,
+  ProviderSetupView,
+  ProviderConnectIo,
 } from './session-like.js';
 
 export type {
@@ -115,7 +117,9 @@ export type {
   Isolator,
   HandlerModuleRef,
 } from './isolation.js';
-export { ISOLATION_RANK } from './isolation.js';
+export { ISOLATION_RANK, aggregateCapabilitySpecs } from './isolation.js';
+
+export { FIRST_PARTY_PLUGIN_SCOPE, isFirstPartyPackage } from './first-party.js';
 
 export type {
   SubagentSpec,
@@ -188,6 +192,12 @@ export type {
   SessionMeta,
   SessionSource,
 } from './event-store.js';
+export { SESSION_SOURCES } from './event-store.js';
+export type {
+  ReflectorDef,
+  ReflectContext,
+  ReflectionProposal,
+} from './reflector.js';
 // Node-runtime helpers (writeFileAtomic*, moxxyHome/moxxyPath,
 // readRequestBody/bearerTokenMatches, channel-auth) are exported from the
 // './server' subpath, NOT the main barrel — they statically reach node:*
@@ -226,6 +236,11 @@ export {
   type MoxxyErrorCode,
   type MoxxyErrorInit,
 } from './errors.js';
+// Shared retry primitives: a leak-safe, abort-aware sleep + the exponential
+// back-off schedule. General-purpose — not mode-loop internals: the runner's
+// connect retry and the desktop supervisor's restart wait use them too, so
+// don't reimplement an ad-hoc `new Promise(setTimeout)` back-off elsewhere.
+export { sleepWithAbort, nextBackoffMs } from './mode/abort-backoff.js';
 export {
   collectProviderStream,
   runSingleShotTurn,
@@ -234,8 +249,6 @@ export {
   buildSystemPromptWithSkills,
   createStuckLoopDetector,
   stableHash,
-  sleepWithAbort,
-  nextBackoffMs,
   type CollectedToolUse,
   type StreamResult,
   type ProjectMessagesOptions,
@@ -365,7 +378,7 @@ export type {
   ResolvedPluginManifest,
 } from './plugin.js';
 
-export { startChannelWith } from './channel.js';
+export { startChannelWith, EXIT_AFTER_PAIR_FLAG, exitAfterPairRequested } from './channel.js';
 export type {
   Channel,
   ChannelHandle,
@@ -456,10 +469,14 @@ export {
   skillFrontmatterSchema,
   pluginManifestSchema,
   moxxyPackageSchema,
+  pluginSetupFieldSchema,
+  pluginSetupSchema,
   requirementSchema,
   type SkillFrontmatterInput,
   type PluginManifestInput,
   type MoxxyPackageInput,
+  type PluginSetupField,
+  type PluginSetupSpec,
 } from './schemas.js';
 
 export {

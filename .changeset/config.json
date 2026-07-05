@@ -9,7 +9,10 @@
       "@moxxy/core",
       "@moxxy/config",
       "@moxxy/agent",
-      "@moxxy/plugin-provider-*"
+      "@moxxy/channel-kit",
+      "@moxxy/plugin-*",
+      "@moxxy/mode-*",
+      "@moxxy/e2e"
     ]
   ],
   "linked": [],

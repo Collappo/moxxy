@@ -1,6 +1,6 @@
 {
   "name": "@moxxy/cli",
-  "version": "0.25.0",
+  "version": "0.27.0",
   "description": "moxxy command-line binary. Subcommand dispatcher consuming the moxxy SDK.",
   "keywords": [
     "moxxy",
@@ -43,6 +43,7 @@
   },
   "files": [
     "dist",
+    "!dist/**/*.map",
     "README.md"
   ],
   "publishConfig": {
@@ -62,8 +63,7 @@
     "zod": "catalog:"
   },
   "optionalDependencies": {
-    "@napi-rs/keyring": "^1.3.0",
-    "node-pty": "^1.0.0"
+    "@napi-rs/keyring": "^1.3.0"
   },
   "devDependencies": {
     "@clack/prompts": "catalog:",
@@ -75,23 +75,15 @@
     "@moxxy/isolator-wasm": "workspace:*",
     "@moxxy/isolator-worker": "workspace:*",
     "@moxxy/mode-collaborative": "workspace:*",
-    "@moxxy/mode-deep-research": "workspace:*",
     "@moxxy/mode-default": "workspace:*",
-    "@moxxy/mode-goal": "workspace:*",
-    "@moxxy/plugin-browser": "workspace:*",
-    "@moxxy/plugin-channel-http": "workspace:*",
     "@moxxy/plugin-channel-mobile": "workspace:*",
-    "@moxxy/plugin-channel-slack": "workspace:*",
-    "@moxxy/plugin-channel-web": "workspace:*",
     "@moxxy/plugin-cli": "workspace:*",
     "@moxxy/plugin-collab": "workspace:*",
     "@moxxy/plugin-commands": "workspace:*",
-    "@moxxy/plugin-computer-control": "workspace:*",
     "@moxxy/plugin-embeddings-openai": "workspace:*",
     "@moxxy/plugin-embeddings-transformers": "workspace:*",
     "@moxxy/plugin-mcp": "workspace:*",
     "@moxxy/plugin-memory": "workspace:*",
-    "@moxxy/plugin-oauth": "workspace:*",
     "@moxxy/plugin-plugins-admin": "workspace:*",
     "@moxxy/plugin-provider-admin": "workspace:*",
     "@moxxy/plugin-provider-claude-code": "workspace:*",
@@ -99,15 +91,7 @@
     "@moxxy/plugin-scheduler": "workspace:*",
     "@moxxy/plugin-security": "workspace:*",
     "@moxxy/plugin-self-update": "workspace:*",
-    "@moxxy/plugin-stt-whisper": "workspace:*",
-    "@moxxy/plugin-stt-whisper-codex": "workspace:*",
-    "@moxxy/plugin-subagents": "workspace:*",
-    "@moxxy/plugin-telegram": "workspace:*",
-    "@moxxy/plugin-terminal": "workspace:*",
-    "@moxxy/plugin-usage-stats": "workspace:*",
     "@moxxy/plugin-vault": "workspace:*",
-    "@moxxy/plugin-view": "workspace:*",
-    "@moxxy/plugin-voice-admin": "workspace:*",
     "@moxxy/plugin-webhooks": "workspace:*",
     "@moxxy/plugin-workflows": "workspace:*",
     "@moxxy/runner": "workspace:*",

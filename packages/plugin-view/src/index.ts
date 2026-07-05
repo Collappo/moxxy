@@ -88,6 +88,9 @@ export function buildViewPlugin(opts: BuildViewPluginOptions, hooks?: LifecycleH
         .optional()
         .describe('Plain-text summary shown on channels that cannot render views.'),
     }),
+    // Parse + validate in-memory; delivery to the web surface happens outside
+    // the handler (the channel's projector observes the tool_result).
+    isolation: { capabilities: { net: { mode: 'none' }, timeMs: 10_000 } },
     handler: (input, ctx?: ToolContext): PresentViewResult => {
       // Short-circuit a cancelled turn before the heaviest work (parse + count
       // + AST serialization on a near-20k spec). ctx is optional only so unit
@@ -232,3 +235,6 @@ export interface PresentViewResult {
   readonly ast?: ViewDoc;
   readonly errors?: ReadonlyArray<{ message: string; line?: number }>;
 }
+
+// Discovery entry: `createPluginLoader` requires a default Plugin export.
+export default viewPlugin;

@@ -13,6 +13,81 @@ or recorded-on-purpose decision.
 
 ## Resolved ledger
 
+- [med, security, RESOLVED 2026-07-03] `security.perPlugin` isolator overrides were
+  a dormant config option: real sessions wired `buildSecurityPlugin` with
+  `resolvePluginForTool: null` (plugin-level routing disabled), so the documented
+  `perPlugin` schema key never routed anything. The CLI now resolves tool → owning
+  plugin from the plugin host's loaded records (`PluginHost.ownerOfTool`, exposed on
+  the SDK `PluginHostHandle` as optional so thin clients may omit it), which also
+  powers the new `moxxy security audit --package <name>` / `--by-package` views and
+  install_plugin's combined-capability report. `packages/cli/src/setup/builtins.ts`,
+  `packages/core/src/plugins/host.ts`, `packages/plugin-security/src/index.ts`.
+- [med, dx, RESOLVED 2026-07-03] `service install` units no longer break under
+  Electron-as-node: `installAndStartService` detects `process.versions.electron`
+  and exports `ELECTRON_RUN_AS_NODE=1` into the unit env, so a desktop-spawned
+  install can't boot the GUI as a ghost daemon. The "prefer the Helper binary"
+  half was deliberately skipped — the env var fully fixes launch semantics and
+  the Helper path is packaging-layout-dependent.
+  `packages/cli/src/commands/service/index.ts`.
+- [low, sessions, RESOLVED 2026-07-03] `SessionSource` literals were hand-listed in
+  one runtime spot (`sessionSource()`'s validator in
+  `packages/cli/src/setup/persistence.ts`) — adding the Discord channel's
+  `'discord'` source hit exactly the two-spot update this entry warned about, so
+  the list is now a runtime constant: `SESSION_SOURCES` in `@moxxy/sdk`
+  event-store.ts, with the `SessionSource` type DERIVED from it
+  (`(typeof SESSION_SOURCES)[number]`) and the CLI guard doing an `includes()`
+  against the same array. New sources are now a one-line change that can't be
+  silently dropped by a stale validator.
+- [dormant, browser, RESOLVED 2026-07-03] CDP screencast push path (`startScreencast`/
+  `stopScreencast` sidecar handlers) — the entry was stale: the handlers were already
+  deleted in the PR #212 quality sweep; only screenshot-polling remains (rationale in
+  `packages/plugin-browser/src/browser-surface.ts`). A regression guard pins the former
+  methods to `unknown method` (`packages/plugin-browser/src/sidecar/dispatch.test.ts`).
+- [low, tools, RESOLVED 2026-07-03] `resolveSafe` deprecated alias for `resolvePath`
+  removed (no callers remained). `packages/tools-builtin/src/util.ts`.
+- [med, mobile, RESOLVED 2026-07-03] `apps/mobile` was the only package in the
+  repo type-checking without `noUncheckedIndexedAccess` + `verbatimModuleSyntax`
+  (it extends `expo/tsconfig.base`, not the moxxy base, so it silently missed the
+  strict baseline). Both flags are now set explicitly in its tsconfig and the
+  surfaced errors fixed. Gotcha: `expo-file-system` ships raw TS source
+  (`"main": "src/index.ts"`) and the `/legacy` subpath has no `types` mapping, so
+  tsc type-checked Expo's own source under the new flag — resolved by migrating
+  the app's three read call sites off `expo-file-system/legacy` onto the modern
+  SDK 54 `File` API (`new File(uri).base64()/.text()`), whose root import
+  resolves through the shipped `.d.ts` where `skipLibCheck` applies.
+  `apps/mobile/tsconfig.json`, `apps/mobile/src/pairingUrl.ts`,
+  `apps/mobile/src/styles/tokens.ts`, `apps/mobile/src/hooks/useAttachments.ts`,
+  `apps/mobile/src/hooks/useVoiceRecorder.ts`.
+- [low, dry, RESOLVED 2026-07-03] Ad-hoc retry/backoff sleeps consolidated onto the
+  sdk's shared `sleepWithAbort` (now surfaced directly on the barrel next to
+  `nextBackoffMs`, not buried in the mode-helpers block): the runner's
+  initial-connect retry + SIGTERM grace waits and the desktop supervisor's restart
+  wait (`forceRetry` now aborts the sleep) / socket poll / kill grace. Schedules
+  deliberately unchanged (linear connect retry, constant supervisor wait).
+  `packages/runner/src/remote-session.ts`,
+  `packages/desktop-host/src/runner-supervisor.ts`, `packages/sdk/src/index.ts`.
+- [med, sessions, RESOLVED 2026-07-03] Event-log READS no longer cast blindly:
+  all three JSONL parse sites (`restoreEvents`, `readEventPage`, index
+  hydration) route through a shallow structural guard (`isMoxxyEventShape`)
+  that skips wrong-shape-but-valid-JSON lines with the exact corrupt-line
+  semantics (never throw mid-replay; restore counts them as
+  `invalidShapeLines` and repairs the file). This closes the read-side leak in
+  the EventStore trust boundary (Pillar 2 note below): a junk line can no
+  longer drive replay (a `compaction` line missing `replacedRange` used to
+  throw inside `projectMessagesFromLog`'s unconditional dereference). The
+  guard is allocation-free per line, exhaustively typed against the
+  `MoxxyEvent` union (variant drift fails the build), and deliberately keeps
+  unknown NEWER event types with a valid envelope so a floor rollback can't
+  rewrite away a newer version's history.
+  `packages/core/src/sessions/event-shape.ts`.
+- [low, focus, RESOLVED 2026-07-02] Focus Mode mini-chat no longer carries a
+  separate text-only composer path: pasted screenshots now reuse the desktop
+  attachment save/preview/send pipeline, zoomed image previews can be drag-panned,
+  and the mini-text panel remembers the user's native-resized size through local prefs.
+  `apps/desktop/src/focus/`, `apps/desktop/src/chat/image-preview/ImagePreviewModal.tsx`,
+  `apps/desktop/src/chat/composer/useComposerAttachments.ts`,
+  `packages/desktop-ipc-contract/src/{prefs,validation}.ts`,
+  `packages/desktop-host/src/{prefs,focus-window}.ts`.
 - [high, collab, RESOLVED 2026-07-01] Collaboration is now a SEPARATE feature on
   BOTH surfaces: the coordinator runs on its own dedicated `moxxy collab` runner
   (own Session + socket), never inside a chat session — no mode-flip, no team
@@ -39,6 +114,32 @@ or recorded-on-purpose decision.
   so the workspace sidebar no longer falls back to duplicate/stuck
   `New session` labels. `packages/core/src/sessions/persistence.ts`,
   `packages/workspace-registry/src/index.ts`.
+- [med, mobile, RESOLVED 2026-07-01] Moxxy Mobile Live Activity taps now route to
+  an existing chat route, derive labels from real session/workspace state, and
+  avoid false completion notifications on transient background disconnects.
+  `apps/mobile/src/liveActivity.ts`,
+  `apps/mobile/ios/MoxxyLiveActivityExtension/MoxxyLiveActivityWidget.swift`.
+- [med, mobile, RESOLVED 2026-07-02] Moxxy Mobile now flushes the latest active
+  Live Activity snapshot when iOS backgrounds the app, treats streaming assistant
+  transcript as active work even when turn flags lag, dedupes same-session native
+  ActivityKit activities, and keeps the lock-screen badge/detail compact.
+  `apps/mobile/src/liveActivity.ts`,
+  `apps/mobile/src/hooks/useMoxxyLiveActivity.ts`,
+  `apps/mobile/ios/MoxxyMobileGateway/MoxxyLiveActivity.swift`,
+  `apps/mobile/ios/MoxxyLiveActivityExtension/MoxxyLiveActivityWidget.swift`.
+- [med, mobile, RESOLVED 2026-07-02] Moxxy Mobile active turns now reconcile
+  missed lifecycle completion pushes from the runner's authoritative history,
+  so a foregrounded/reconnected phone does not keep showing Thinking/Live
+  Activity after desktop already received the final answer.
+  `packages/client-core/src/chat-store/store.ts`,
+  `apps/mobile/src/hooks/useGatewayStore.tsx`.
+- [med, mobile, RESOLVED 2026-07-02] Moxxy Mobile reconnect recovery now also
+  reconstructs missed turn starts from runner history and performs a one-shot
+  foreground/reconnect refresh even before `activeTurnId` is known, so Live
+  Activity can restart from authoritative state after the phone missed the
+  `runner.turn.started` push.
+  `packages/client-core/src/chat-store/store.ts`,
+  `apps/mobile/src/hooks/useGatewayStore.tsx`.
 
 ## Standing practices
 
@@ -69,11 +170,6 @@ or recorded-on-purpose decision.
   on the `moxxy mobile` runner to make it airtight. `packages/plugin-channel-mobile`.
 - [note] Stress-test multi-session with a desk's SECOND (UUID) session — the first
   session has id === desk id, which masks pool-key regressions. `packages/desktop-host`.
-- [low] `SessionSource` literals are still hand-listed in one runtime spot:
-  `sessionSource()`'s validator in `packages/cli/src/setup/persistence.ts` (a type
-  can't be enumerated at runtime). `DeskSession.source` in `@moxxy/desktop-ipc-contract`
-  was unified onto the SDK type (2026-06-26); when adding a source, update the
-  union in `@moxxy/sdk` event-store.ts AND that guard.
 - [low] TUI `/sessions` switcher only works in self-host/standalone mode (the TUI
   owns the boot, so it can re-bootstrap onto a different session in place). In
   ATTACH mode (thin client against an external `moxxy serve`) the runner owns a
@@ -86,8 +182,33 @@ or recorded-on-purpose decision.
   not cheap; a warm-registry / session-pool reuse would make switching instant.
   `packages/cli/src/commands/run-tui.ts`.
 
+## Mobile / Live Activity
+
+- [med, mobile, PARTIALLY DONE] Moxxy Mobile's Live Activity can only update from
+  local JS while the app process is alive. Local backgrounding now flushes the
+  latest known active state, native duplicates are cleaned up, and foregrounded
+  clients can recover missed starts/completions from runner history, but if the
+  phone is already fully suspended before a desktop turn starts, iOS may pause
+  the WS client before any local ActivityKit update can be sent. Confirmed on
+  2026-07-02 with iPhone 17 Simulator: a desktop-gateway turn started while the
+  mobile app was locked produced runner/tool events, but no lock-screen Live
+  Activity or completion notification until the app was foregrounded. Remaining:
+  correct end-to-end background fidelity needs a push-backed ActivityKit update
+  path (per-activity push token + APNs update/end from a relay/host) or an
+  equivalent server-side bridge.
+  `apps/mobile/src/hooks/useMoxxyLiveActivity.ts`,
+  `apps/mobile/ios/MoxxyMobileGateway/MoxxyLiveActivity.swift`.
+
 ## Runner / protocol & architecture
 
+- [note, dry] Three inline backoff/retry implementations remain ON PURPOSE and must
+  not be "deduped" onto `@moxxy/sdk`'s `sleepWithAbort`/`nextBackoffMs`:
+  `client-transport-ws/src/json-rpc-client.ts` (cancellable-timer reconnect; the
+  sdk barrel statically reaches `node:fs/promises`, which breaks its Metro/RN
+  bundle — rationale commented at the site), `plugin-channel-web/src/frontend/
+  socket.ts` (browser bundle), `plugin-provider-claude-code/src/login.ts`
+  (bespoke OAuth retry). Revisit only if the sdk grows a dependency-free
+  browser-safe subpath (like `@moxxy/sdk/tool-display`).
 - [high, architecture] Retype channel handlers to the SDK contract — `ClientSession`
   still exposes the full concrete registry surface; retype handler params to a
   minimal `SessionLike` slice (and verify graceful degradation) alongside the
@@ -115,11 +236,13 @@ or recorded-on-purpose decision.
   if adding open/close call sites (a single viewer's close must not destroy a shared
   instance). `packages/core/src/surfaces/host.test.ts`.
 - [constraint] Terminal sizing depends on the pane being full-width at mount — never
-  push a transient/sub-full column count to a PTY-backed surface. `packages/core/src/surfaces/`.
-- [dormant] CDP screencast → screenshot-polling fallback is unused — remove, or
-  gate behind the polling fallback if screencast is revived. `plugin-browser/src/sidecar/`.
+  push a transient/sub-full column count to a PTY-backed surface. Guarded renderer-side
+  (120px-width floor + rAF-coalesced fit in `apps/desktop/src/shell/surfaces/TerminalPane.tsx`)
+  and validated/clamped in `packages/plugin-terminal/src/{terminal,pty}.ts`; keep new
+  viewers behind the same guard.
 - [dormant] Piped-shell fallback is intentionally non-interactive — needs CR→LF +
-  local echo if a no-prebuild platform ever needs it. `packages/core/src/surfaces/pty.ts`.
+  local echo if a no-prebuild platform ever needs it (the degraded state IS surfaced
+  to the viewer). `packages/plugin-terminal/src/pty.ts`.
 - [low] Files pane polls IPC instead of streaming via the Surface protocol — promote
   to a real Surface if a third live pane appears. `apps/desktop/src/shell/surfaces/`.
 - [low] "Add to agent" on a git-changed file assumes cwd === repo root. `FilesPane.tsx`.
@@ -182,6 +305,14 @@ or recorded-on-purpose decision.
 
 ## Channels, relay & HTTP
 
+- [low] Discord channel pairing is terminal-only: the DM code flow (bot DMs a
+  one-time code → operator pastes it into `moxxy discord pair`) has no GUI
+  completion path, so the desktop Channels panel can start the bot dedicated
+  (window armed, codes issued) but the paste must happen in a terminal, and the
+  already-running dedicated runner only reloads the authorized principal at
+  start — pairing from the desktop means run `moxxy discord pair`, then restart
+  the channel. A `channels.confirmPairingCode` control-surface hook (status-file
+  or IPC) would close both gaps. `packages/plugin-channel-discord`.
 - [low] Desktop channel catalog is now a MIRROR, not the only copy: each channel
   self-describes its config on `ChannelDef.config` (`fields`/`vaultKey`/
   `hasRequestUrl`/`runHint`), which the TUI `/channels` panel + `moxxy channels`
@@ -202,10 +333,42 @@ or recorded-on-purpose decision.
   monitoring + redeploy story (decide on an emergency escape hatch). `plugin-tunnel-proxy`.
 - [med] Channel→core prod dependency — `plugin-cli`/`plugin-telegram` still import
   core helpers; hoist provider-neutral ones into the SDK. 
-- [med] Shared HTTP-channel server base — `createServer`/`listen`/health/routing is
-  replicated across `plugin-channel-http`/`-web`/`webhooks`/`ipc-server-ws`/
-  `plugin-channel-slack` (the Slack ingest server is a 6th copy); an optional
-  `HttpChannelServer` base would dedupe (larger refactor, lower payoff).
+- [med, PARTIALLY DONE 2026-07-03] Shared HTTP-channel server base —
+  `createServer`/`listen`/health/routing is replicated across
+  `plugin-channel-http`/`-web`/`webhooks`/`ipc-server-ws`. The Slack copy is
+  RETIRED: `@moxxy/channel-kit` now owns the inbound-webhook scaffold
+  (`IngestHttpServer`: routing/health/size-capped raw body/verify gate/500
+  catch-all + `DeliveryDedupeCache`) and Slack's ingest is a thin pipeline on
+  it. Migrating the remaining four is still the larger, lower-payoff refactor.
+- [note, whatsapp, security] `@moxxy/plugin-channel-whatsapp` is the first channel
+  on an UNOFFICIAL client (Baileys / WhatsApp Web protocol): automating an account
+  violates WhatsApp's ToS and the number can be permanently BANNED. Two standing
+  tradeoffs recorded on purpose: (1) the rotating Baileys auth-state (signal
+  sessions/pre-keys/creds) is stored UNENCRYPTED at rest under
+  `~/.moxxy/whatsapp-auth` (dir 0700, files 0600) — the vault is the wrong home for
+  a high-write rotating key store, so it isn't used; anyone with file access to the
+  moxxy home can hijack the linked session. The `WhatsAppAuthStorage` interface
+  exists so an encrypted backend can be swapped in later without touching the
+  channel. (2) permission prompts are PLAIN-TEXT numbered replies (Baileys has no
+  reliable multi-device interactive buttons), captured as the owner's next short
+  message. Follow-ups: encrypted auth-state backend; per-chat concurrency (single
+  global `busy` today, like Slack v1); richer formatting.
+  `packages/plugin-channel-whatsapp/`.
+- [note, channels] Channel scaffolding shared by telegram+slack+signal+whatsapp
+  now lives in `@moxxy/channel-kit` (FramePump, TurnCoordinator + turnId-filtered
+  turn helpers, host-code + TOFU pairing machines, `resolveSecret`, audited
+  allow-list resolver, ingest scaffold, PlainTurnRenderer). Signal + WhatsApp
+  (2026-07-03) validated the thin-adapter claim: both consume
+  TurnCoordinator/driveTurn/PlainTurnRenderer/resolveSecret (Signal also
+  createAuditedAllowListResolver, WhatsApp also FramePump) and add only their
+  messenger's quirks. New channels (Discord) should be thin adapters over it —
+  messenger quirks (formatting, transport error mapping, signature schemes,
+  pairing wording) stay in each plugin.
+  Deliberately NOT extracted (single-implementation or channel-specific):
+  Telegram's rich TurnRenderer/HTML pipeline + inline-keyboard
+  permission/approval prompts + grammy dispatch, Slack's HMAC verify + zod
+  envelope schema + Web-API client, both setup wizards/pair flows.
+  `packages/channel-kit/`.
 - [med, slack v1] Slack channel runs a SINGLE global `busy` single-flight — one
   turn at a time across ALL threads/channels (a 2nd @mention while busy gets a
   "still working" reply and is dropped). Per-thread concurrency (a turn per
@@ -218,6 +381,23 @@ or recorded-on-purpose decision.
 - [low, slack v1] Slack replies stream as PLAIN TEXT via `chat.update` (no
   Block Kit / mrkdwn formatting, no message split for very long replies). A
   Telegram-style renderer + Block Kit would improve fidelity. `packages/plugin-channel-slack/`.
+- [med, signal v1, security] Signal channel is AUTONOMOUS like Slack —
+  allow-list auto-approve, no human-in-the-loop (every auto-approved call is
+  logged). Signal has no server-side button UI, but a reply-keyword approval
+  flow ("reply YES/NO to approve") over the deferred resolver is feasible for
+  v2. Also v1 gates on a static sender allow-list edited only via the vault
+  key / `--allowedSenders`; an `allow <number>` subcommand would help.
+  `packages/plugin-channel-signal/`.
+- [med, signal v1] Signal channel is direct-message only (group envelopes are
+  dropped) and runs the same single global `busy` single-flight as Slack v1.
+  Group support needs a group-id trust story + `groupId` send targets.
+  `packages/plugin-channel-signal/`.
+- [low, signal v1] Replies are plain-text buffered chunk sends (justified in
+  `channel/chunker.ts` — Signal edits re-deliver the full body E2E per frame),
+  so there is no live-updating draft; liveness is the typing indicator only.
+  If signal-cli ever grows a cheap draft/edit path, revisit FramePump here.
+  Daemon crash recovery is exit-fatal (supervisor restart), not in-process
+  respawn. `packages/plugin-channel-signal/`.
 - [med, security] LAN pairing is cleartext `ws://` (RN/Expo can't trust a self-signed
   cert for a private IP); the secure phone path is the tunnel (`wss://`). Add optional
   `https.Server` + dev-build pinning only if direct-LAN encryption ever matters.
@@ -266,9 +446,18 @@ or recorded-on-purpose decision.
 - [note, RESOLVED 2026-06-25] Pillar 2 done: the **EventStore** behind the event
   log is now a registry kind (`eventStore`) with a protected JSONL floor and an
   explicit-opt-in trust boundary, behaviour-identical (thin adapter over
-  `SessionPersistence`). Pillar 3 (slim-core kernel + publish ~40 plugins +
-  init-provisions + desktop seed-pack) remains planned but unstarted. Plan:
-  `~/.claude/plans/i-think-we-need-zany-wirth.md`.
+  `SessionPersistence`). Plan: `~/.claude/plans/i-think-we-need-zany-wirth.md`.
+  2026-07-03: the read-side gap this boundary still leaked (JSONL lines cast to
+  `MoxxyEvent` instead of validated) is closed — see the `isMoxxyEventShape`
+  entry in the resolved ledger.
+- [note, updated 2026-07-03] Pillar 3 is HALF done, not unstarted: #363/#364
+  shipped the shared `provision()` engine + `moxxy provision`, reworked `init`
+  (catalog + `ensureProvider` npm-installs on demand), and unbundled the 6
+  API-key providers (published, fixed changeset group). Remaining, tracked in
+  plan `~/.claude/plans/cheerful-booping-nebula.md`: unbundle the ~20 still-private
+  discovery-loadable plugins in batches, pin on-demand installs to the CLI
+  version (currently `latest`), desktop seed pack, TUI install/connect
+  affordances.
 - [low, follow-up] EventStore: only the WRITE path routes through the active
   store (`attachSessionPersistence` → `getActive().open()`). The session-scoped
   READS (`restoreSessionEvents`/`readSessionEventPage` in build-session, runner
@@ -282,11 +471,23 @@ or recorded-on-purpose decision.
 
 ## CLI / services
 
-- [med, dx] `service install` units break under Electron-as-node (`nodeBin()` returns
-  the Electron binary, no `ELECTRON_RUN_AS_NODE=1` → GUI ghost). Detect run-as-node,
-  export the env var, prefer the Helper binary. `packages/cli/src/commands/service/common.ts`.
+- [med, channels, security] The serve.ts "first interactive channel wins the shared
+  permission resolver" note is aspirational, not real: the `resolverSetByChannel`
+  gate only exists in the `serve --all` startup loop (`serve.ts` `startChannel`),
+  while every pairing/attach path calls `session.setPermissionResolver`
+  UNCONDITIONALLY (`start-registered-channel.ts` both attach modes, each channel's
+  `pair-flow.ts`, mobile `single-session-host.ts`) — so in practice the resolver is
+  last-writer-wins: pair Discord then WhatsApp and Discord silently stops receiving
+  permission prompts (they route to the most recent channel's surface). One Session
+  has exactly one resolver slot (`core/src/session.ts setPermissionResolver`).
+  `moxxy onboard` sidesteps it (single channel pick, pair-then-return), but a real
+  fix needs either per-source resolver routing on the Session or a documented
+  broker. Surfaced 2026-07-03 while building onboard.
 - [med] One-shot CLI commands (`-p`, `schedule run`, `doctor`, `login`, `init`) never
   `close()` — drain persistence before exit. `packages/cli/`.
+- [low, security-dx] SECURITY.md's hardening checklist recommends rotating channel
+  tokens, but `rotateChannelToken` is SDK-only — no CLI wraps it. Consider
+  `moxxy channels rotate-token <name>`. `packages/sdk/src/channel-auth.ts`.
 
 ## Mobile UI (low-priority polish)
 
@@ -298,6 +499,13 @@ or recorded-on-purpose decision.
   header rename low-discoverability; composer-minimize overlay gesture not wired.
 - [note] EAS build: `eas-build-post-install` runs `pnpm build` on the workspace
   closure; local repro needs wiping both `dist/` AND `*.tsbuildinfo`. `apps/mobile/eas.json`.
+
+## Docs site
+
+- [note, logged 2026-07-03] `apps/docs/src/content/docs/why-moxxy.md` carries
+  dated competitor claims (star counts, channel counts, security-posture quotes
+  from OpenClaw/pi/Hermes READMEs, "as of July 2026"). These go stale; re-verify
+  against the linked sources roughly quarterly or when a comparison looks off.
 
 ## Memory & embeddings
 

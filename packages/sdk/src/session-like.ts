@@ -1,9 +1,11 @@
 import type { MoxxyEvent, TriggerOrigin, UserPromptAttachment } from './events.js';
 import type { SessionId, TurnId } from './ids.js';
+import type { CapabilitySpec } from './isolation.js';
 import type { EventLogReader } from './log.js';
 import type { ApprovalResolver, ModeBadge } from './mode.js';
 import type { PermissionResolver } from './permission.js';
-import type { ModelDescriptor } from './provider.js';
+import type { ModelDescriptor, ProviderKeyValidation } from './provider.js';
+import type { PluginSetupSpec } from './schemas.js';
 import type { ToolCompactPresentation } from './tool.js';
 
 /**
@@ -281,6 +283,9 @@ export interface InstallablePluginView {
   readonly installSpec: string;
   readonly kind?: string;
   readonly startCommand?: string;
+  /** Registry contributions the package provides (category + name) — lets
+   *  surfaces offer install-on-first-use for a missing capability. */
+  readonly provides?: ReadonlyArray<{ readonly category: string; readonly name: string }>;
 }
 
 /** One loaded plugin in {@link PluginsAdminView.loaded}, grouped by `kinds`. */
@@ -350,6 +355,100 @@ export interface PluginsAdminView {
    * (`setActive`). Rejects an unknown category or an unregistered name.
    */
   setCategoryDefault(category: string, name: string): Promise<void>;
+  /**
+   * Install a plugin (npm into `~/.moxxy/plugins`), persist its enable, and
+   * hot-reload the plugin host so its contributions register live. Accepts a
+   * catalog id, a package name, or a full npm spec. Resolves with the spec
+   * that installed plus the diff of contribution names that registered,
+   * keyed by kind (`tools`, `providers`, `modes`, …). Optional capability
+   * per the seam convention: a `RemoteSession` leaves it undefined and the
+   * picker falls back to printing the `moxxy plugins install` command.
+   */
+  install?(idOrSpec: string): Promise<{
+    readonly installed: string;
+    readonly registered: Readonly<Partial<Record<string, ReadonlyArray<string>>>>;
+    /**
+     * Combined capability surface of the tools this install registered —
+     * the package's blast radius, so a channel can render post-install
+     * consent (third-party packages) or an info line (first-party). Absent
+     * when the install registered no tools or the host cannot introspect
+     * isolation specs.
+     */
+    readonly capabilities?: {
+      /** Tools that declared an isolation spec. */
+      readonly declared: number;
+      /** Tools the install registered. */
+      readonly total: number;
+      /** Widest-wins union of the declared specs. */
+      readonly surface: CapabilitySpec;
+      /** Tools with NO declaration: their surface is unknown, not empty. */
+      readonly undeclaredTools?: ReadonlyArray<string>;
+    };
+    /** Present when the package declares a `moxxy.setup` step to complete. */
+    readonly needsSetup?: { readonly title: string; readonly required: boolean };
+  }>;
+  /**
+   * The package's declarative setup step (`moxxy.setup`), read from its
+   * installed package.json — plain data, safe to render anywhere. Null when
+   * absent. Powers the post-install dialog and `/setup`.
+   */
+  setupSpec?(packageName: string): Promise<PluginSetupSpec | null>;
+  /**
+   * Persist collected setup values: secrets → vault + `${vault:NAME}` option
+   * ref; other kinds → `plugins.packages.<pkg>.options.<key>`. A complete
+   * required setup re-enables the package; an incomplete one disables it
+   * (mirrors the init wizard). Optional capability per the seam convention.
+   */
+  applySetup?(
+    packageName: string,
+    values: Readonly<Record<string, string | boolean>>,
+  ): Promise<{ readonly complete: boolean; readonly missing: ReadonlyArray<string> }>;
+}
+
+/** IO a channel supplies to drive an interactive OAuth flow inside its own
+ *  UI — mirrors `ProviderAuthContext` minus vault/headless (the host adds
+ *  those). `write` receives the flow's progress lines (sign-in URL, status);
+ *  `prompt` renders a single-line input (paste-back codes), masked for
+ *  secrets. */
+export interface ProviderConnectIo {
+  readonly write: (chunk: string) => void;
+  readonly prompt?: (question: string, opts?: { readonly mask?: boolean }) => Promise<string>;
+}
+
+/**
+ * The slice of provider onboarding a channel needs to connect a provider
+ * WITHOUT leaving the session: install it if it's catalog-only, collect +
+ * validate + store an API key, or drive an OAuth sign-in. Present on a local
+ * Session (wired by the CLI, which owns vault + catalog); a `RemoteSession`
+ * leaves {@link SessionLike.providerSetup} undefined and the UI falls back
+ * to pointing at `moxxy init` / `moxxy login`.
+ */
+export interface ProviderSetupView {
+  /**
+   * How this provider authenticates: from its registered def, else the
+   * first-party catalog; null when the id is unknown to both.
+   */
+  authKind(providerId: string): 'apiKey' | 'oauth' | 'none' | null;
+  /**
+   * Ensure the provider's package is registered — a catalog-only provider is
+   * npm-installed + enabled + hot-reloaded. Resolves false when the provider
+   * still isn't registered afterwards (unknown id, bad install).
+   */
+  ensureInstalled(providerId: string): Promise<boolean>;
+  /** Validate a key against the provider's own `validateKey` (if it has one). */
+  testKey(providerId: string, key: string): Promise<ProviderKeyValidation>;
+  /** Store the key in the vault under the provider's canonical key name and
+   *  mark the provider ready for this session. */
+  saveKey(providerId: string, key: string): Promise<void>;
+  /**
+   * Drive the provider's OAuth flow. `io` routes the flow's output/prompts
+   * into the calling channel's UI; when omitted the host's default terminal
+   * prompting applies (the clack path `moxxy init`/`moxxy login` use).
+   */
+  loginOAuth(
+    providerId: string,
+    io?: ProviderConnectIo,
+  ): Promise<{ readonly accountId?: string | null; readonly expiresAt?: number }>;
 }
 
 /**
@@ -406,4 +505,18 @@ export interface SessionLike {
   workflows?: WorkflowsView;
   /** Plugin-management slice backing the `/plugins` picker. */
   pluginsAdmin?: PluginsAdminView;
+  /** Provider onboarding slice backing in-channel connect (key entry / OAuth). */
+  providerSetup?: ProviderSetupView;
+  /**
+   * Re-read the merged config from disk and live-apply the safe subset —
+   * backs the TUI /settings panel's write-then-apply. Structurally matches
+   * @moxxy/config's ConfigApplyResult (the SDK stays config-free). Absent on
+   * a RemoteSession: writes still land, but apply waits for a restart.
+   */
+  configAdmin?: {
+    apply(): Promise<{
+      readonly applied: ReadonlyArray<string>;
+      readonly pending: ReadonlyArray<string>;
+    }>;
+  };
 }

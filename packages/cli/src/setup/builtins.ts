@@ -2,8 +2,17 @@ import { runTurn, type Session } from '@moxxy/core';
 import { MoxxyError, isSelectableMode, type CategoryView, type Plugin } from '@moxxy/sdk';
 import type { MoxxyConfig } from '@moxxy/config';
 import {
+  buildCapabilityReport,
+  diffSnapshot,
+  findCatalogEntryForContribution,
   INSTALLABLE_PLUGIN_CATALOG,
+  applySetupValues,
+  installPluginPackagePinned,
+  packageNameFromSpec,
+  readPluginSetup,
+  resolveCatalogEntry,
   setCategoryDefault as persistCategoryDefault,
+  setPluginEnabled as persistPluginEnabled,
 } from '@moxxy/plugin-plugins-admin';
 import {
   buildSchedulerPlugin,
@@ -25,7 +34,6 @@ import { workerIsolator } from '@moxxy/isolator-worker';
 import { subprocessIsolator } from '@moxxy/isolator-subprocess';
 import { wasmIsolator } from '@moxxy/isolator-wasm';
 import type { VaultStore } from '@moxxy/plugin-vault';
-import type { MemoryStore } from '@moxxy/plugin-memory';
 import type { WorkflowStore } from '@moxxy/plugin-workflows';
 import {
   buildBuiltinEntries,
@@ -36,6 +44,8 @@ import {
 import { buildSetPluginEnabledLive } from './plugin-toggle.js';
 import { CRITICAL_PACKAGES } from './critical-packages.js';
 import { buildWorkflowsIntegration } from './workflows.js';
+import { buildPluginSnapshot } from './plugin-snapshot.js';
+import { cliVersion } from '../version.js';
 
 // Re-exported so existing consumers (register-plugins.ts) keep importing the
 // shape from here unchanged.
@@ -55,7 +65,6 @@ export const BUILTIN_REQUIREMENT_DECISIONS: Readonly<Record<string, BuiltinRequi
   '@moxxy/plugin-provider-xai': { hardRequirements: false, reason: 'provider is independently activatable' },
   '@moxxy/plugin-provider-google': { hardRequirements: false, reason: 'provider is independently activatable' },
   '@moxxy/plugin-provider-local': { hardRequirements: false, reason: 'local provider needs no credentials; activatable without setup' },
-  '@moxxy/plugin-provider-admin': { hardRequirements: false, reason: 'provider registry access is injected by bootstrap closure' },
   '@moxxy/tools-builtin': { hardRequirements: false, reason: 'core tool pack has no plugin dependency' },
   '@moxxy/mode-default': { hardRequirements: false, reason: 'default mode has no plugin dependency' },
   '@moxxy/mode-goal': { hardRequirements: false, reason: 'mode ships its own goal_complete/goal_abandon tools; no hard plugin dependency' },
@@ -65,27 +74,14 @@ export const BUILTIN_REQUIREMENT_DECISIONS: Readonly<Record<string, BuiltinRequi
   '@moxxy/compactor-summarize': { hardRequirements: false, reason: 'compactor has no plugin dependency' },
   '@moxxy/cache-strategy-stable-prefix': { hardRequirements: false, reason: 'cache strategy has no plugin dependency' },
   '@moxxy/plugin-vault': { hardRequirements: false, reason: 'vault is the base secret store' },
-  '@moxxy/plugin-stt-whisper': { hardRequirements: false, reason: 'generic Whisper backend; harmless without a configured provider' },
-  '@moxxy/plugin-stt-whisper-codex': { hardRequirements: true, reason: 'requires Codex provider and OAuth readiness' },
-  '@moxxy/plugin-memory': { hardRequirements: false, reason: 'memory store is created by bootstrap' },
-  '@moxxy/memory-consolidate': { hardRequirements: true, reason: 'requires @moxxy/plugin-memory contributions' },
   '@moxxy/plugin-cli': { hardRequirements: false, reason: 'TUI channel is standalone' },
   '@moxxy/plugin-channel-http': { hardRequirements: false, reason: 'HTTP channel is standalone' },
-  '@moxxy/plugin-channel-web': { hardRequirements: false, reason: 'web surface is standalone; token auto-generated' },
   '@moxxy/plugin-channel-mobile': { hardRequirements: false, reason: 'mobile WS bridge is standalone; token auto-generated' },
-  '@moxxy/plugin-telegram': { hardRequirements: false, reason: 'vault is injected by bootstrap closure' },
-  '@moxxy/plugin-channel-slack': { hardRequirements: false, reason: 'vault + proxy tunnel resolved from the service registry (both builtin); runs on its own dedicated runner' },
-  '@moxxy/plugin-browser': { hardRequirements: false, reason: 'browser runtime is diagnosed at tool/runtime level' },
-  '@moxxy/plugin-terminal': { hardRequirements: false, reason: 'node-pty is optional; falls back to a piped shell' },
   '@moxxy/plugin-computer-control': { hardRequirements: false, reason: 'platform constraints are handled by tools' },
   '@moxxy/plugin-oauth': { hardRequirements: false, reason: 'vault is injected by bootstrap closure' },
   '@moxxy/plugin-commands': { hardRequirements: false, reason: 'slash commands have no plugin dependency' },
-  '@moxxy/plugin-view': { hardRequirements: false, reason: 'view renderer is seeded by core; the tool defers to the active renderer via closure' },
   '@moxxy/plugin-subagents': { hardRequirements: false, reason: 'agent registry is injected by closure' },
   '@moxxy/plugin-plugins-admin': { hardRequirements: false, reason: 'plugin host access is injected by closure' },
-  '@moxxy/plugin-self-update': { hardRequirements: false, reason: 'plugin host / log access is injected by closure' },
-  '@moxxy/plugin-mcp-admin': { hardRequirements: false, reason: 'tool and skill registries are injected by closure' },
-  '@moxxy/voice-admin': { hardRequirements: false, reason: 'synthesizer registry is injected by closure' },
   '@moxxy/synthesize-skill': { hardRequirements: false, reason: 'session access is injected by closure' },
   '@moxxy/plugin-scheduler': { hardRequirements: false, reason: 'runner and skills registry are injected by closure' },
   '@moxxy/plugin-webhooks': { hardRequirements: false, reason: 'runner is injected by closure' },
@@ -100,8 +96,6 @@ export interface BuildBuiltinsArgs {
   readonly rawConfig: MoxxyConfig;
   readonly vault: VaultStore;
   readonly vaultPlugin: Plugin;
-  readonly memory: MemoryStore;
-  readonly memoryPlugin: Plugin;
   readonly schedulerRunner: SchedulePromptRunner;
   readonly webhookRunner: WebhookPromptRunner;
   /**
@@ -156,6 +150,7 @@ const CATEGORY_REGISTRIES: ReadonlyArray<{
   { category: 'viewRenderer', reg: (s) => s.viewRenderers },
   { category: 'tunnelProvider', reg: (s) => s.tunnelProviders },
   { category: 'eventStore', reg: (s) => s.eventStores },
+  { category: 'reflector', reg: (s) => s.reflectors },
 ];
 
 function buildCategoryViews(session: Session): ReadonlyArray<CategoryView> {
@@ -193,6 +188,18 @@ export function buildCategoryDefaultLive(session: Session): CategoryDefaultLive 
       // For a LIVE category, the name must be registered; persist-only kinds
       // (isolator/channel) are validated against the registry on the next boot.
       if (reg && !reg.list().some((d) => d.name === name)) {
+        // When the catalog knows which package provides it, surface a typed
+        // install affordance instead of a generic error — the TUI turns this
+        // into an "install now?" confirm and the model tool gets the package.
+        const provider = findCatalogEntryForContribution(category, name);
+        if (provider) {
+          throw new MoxxyError({
+            code: 'PLUGIN_NOT_INSTALLED',
+            message: `${category} '${name}' is not installed.`,
+            hint: `Install ${provider.packageName} (install_plugin, or \`moxxy plugins install ${provider.id}\`), then retry.`,
+            context: { category, contribution: name, package: provider.packageName },
+          });
+        }
         throw new MoxxyError({
           code: 'TOOL_ERROR',
           message: `${category} '${name}' is not registered.`,
@@ -222,6 +229,8 @@ function wirePluginsAdminView(
   disabledPackages: Set<string>,
   setPluginEnabledLive: (packageName: string, enabled: boolean) => Promise<void>,
   categoryLive: CategoryDefaultLive,
+  logger: BuildBuiltinsArgs['logger'],
+  vault: BuildBuiltinsArgs['vault'],
 ): void {
   // The live disabled-set, the installable catalog, and the same plug/unplug +
   // swap-default closures the model tools use. A RemoteSession leaves this
@@ -244,10 +253,70 @@ function wirePluginsAdminView(
         installSpec: e.installSpec,
         ...(e.kind ? { kind: e.kind } : {}),
         ...(e.startCommand ? { startCommand: e.startCommand } : {}),
+        ...(e.provides ? { provides: e.provides } : {}),
       })),
     setEnabled: setPluginEnabledLive,
     categories: categoryLive.categories,
     setCategoryDefault: categoryLive.setCategoryDefault,
+    // Real install from the picker: npm into ~/.moxxy/plugins (pinned to the
+    // CLI version for first-party packages, 404 → retry latest), persist the
+    // enable, hot-reload, and report which contributions arrived. Same
+    // building blocks as the install_plugin model tool.
+    install: async (idOrSpec) => {
+      const entry = resolveCatalogEntry(idOrSpec);
+      const spec = entry?.installSpec ?? idOrSpec;
+      // Package name is derivable pre-install for catalog/npm specs but not
+      // for git/path specs (the enable write is skipped — absent means
+      // enabled anyway).
+      const packageName = entry?.packageName ?? packageNameFromSpec(spec);
+      const before = buildPluginSnapshot(session);
+      const { installed } = await installPluginPackagePinned({
+        packageName: spec,
+        ...(cliVersion() ? { cliVersion: cliVersion()! } : {}),
+        onWarn: (msg) => logger.warn(msg),
+      });
+      if (packageName) await persistPluginEnabled(packageName, true);
+      await session.pluginHost.reload();
+      const setup = packageName ? await readPluginSetup(packageName) : null;
+      const registered = diffSnapshot(before, buildPluginSnapshot(session));
+      // The just-registered tools' combined capability surface — what the
+      // TUI renders for post-install consent (third-party) or as an info
+      // line (first-party). Same helper the install_plugin model tool uses.
+      const capabilities = buildCapabilityReport(
+        registered.tools ?? [],
+        (name) => session.tools.get(name)?.isolation,
+      );
+      return {
+        installed,
+        registered,
+        ...(capabilities ? { capabilities } : {}),
+        ...(setup
+          ? { needsSetup: { title: setup.title, required: setup.required === true } }
+          : {}),
+      };
+    },
+    // Declarative setup step (moxxy.setup) — plain data for any renderer.
+    setupSpec: (packageName) => readPluginSetup(packageName),
+    // Persist collected values through the ONE shared writer (secrets → vault
+    // + ${vault:NAME} ref); completeness drives enable/disable exactly like
+    // the init wizard, so /setup can also RE-ENABLE a package a skipped
+    // required setup left disabled.
+    applySetup: async (packageName, values) => {
+      const setup = await readPluginSetup(packageName);
+      if (!setup) return { complete: true, missing: [] };
+      const result = await applySetupValues({
+        vault,
+        cwd: process.cwd(),
+        packageName,
+        setup,
+        values,
+      });
+      if (setup.required === true) {
+        await persistPluginEnabled(packageName, result.complete);
+        if (result.complete) await session.pluginHost.reload();
+      }
+      return result;
+    },
   };
 }
 
@@ -311,11 +380,13 @@ function buildWebhooksSlice(
 function buildSecuritySlice(
   session: Session,
   rawConfig: MoxxyConfig,
+  logger: BuildBuiltinsArgs['logger'],
 ): { entry: BuiltinEntry; security: SecurityPluginHandle } {
   // Its onInit hook fires AFTER every other plugin has registered, so it sees
   // the fully-populated tool registry when wrapping declared-isolation tools.
   // Tools without an `isolation` declaration pass through untouched (unless
-  // `security.requireDeclaration` is set).
+  // `security.requireDeclaration` is set, or — for third-party packages —
+  // `security.thirdPartyRequireDeclaration` warns/denies).
   const security = buildSecurityPlugin({
     config: {
       enabled: rawConfig.security?.enabled ?? false,
@@ -329,9 +400,19 @@ function buildSecuritySlice(
       ...(rawConfig.security?.requireDeclaration !== undefined
         ? { requireDeclaration: rawConfig.security.requireDeclaration }
         : {}),
+      ...(rawConfig.security?.thirdPartyRequireDeclaration !== undefined
+        ? { thirdPartyRequireDeclaration: rawConfig.security.thirdPartyRequireDeclaration }
+        : {}),
     },
     toolRegistry: session.tools,
-    resolvePluginForTool: null,
+    // Sink for the third-party grace-mode warnings; the hook context carries
+    // no logger, so the plugin needs the host's.
+    logger,
+    // Tool → contributing-plugin attribution from the plugin host's loaded
+    // records. Called lazily (post-boot), so the registries are populated by
+    // the time the security plugin or an audit view asks. This is what makes
+    // `security.perPlugin` overrides and `security audit --package` work.
+    resolvePluginForTool: (toolName) => session.pluginHost.ownerOfTool?.(toolName),
     // Register the worker_threads isolator so users can opt in via
     // `security: { isolator: 'worker' }`. It coexists with the built-in
     // `none` + `inproc` isolators; unused isolators have no runtime cost.
@@ -347,7 +428,7 @@ function buildSecuritySlice(
  * can drive the store/poller without going through a model turn.
  */
 export function buildBuiltinsCore(args: BuildBuiltinsArgs): BuiltBuiltinsCore {
-  const { session, rawConfig, vault, vaultPlugin, memory, memoryPlugin, schedulerRunner, webhookRunner, disabledPackages, logger } = args;
+  const { session, rawConfig, vault, vaultPlugin, schedulerRunner, webhookRunner, disabledPackages, logger } = args;
 
   // Shared handle linking the web surface to present_view: the web channel
   // publishes its live URL + view-id minter here on start; the view tool reads
@@ -375,15 +456,13 @@ export function buildBuiltinsCore(args: BuildBuiltinsArgs): BuiltBuiltinsCore {
     rawConfig,
     vault,
     vaultPlugin,
-    memory,
-    memoryPlugin,
     viewSurface,
     webControls,
     setPluginEnabledLive,
     categoryLive,
   });
 
-  wirePluginsAdminView(session, disabledPackages, setPluginEnabledLive, categoryLive);
+  wirePluginsAdminView(session, disabledPackages, setPluginEnabledLive, categoryLive, logger, vault);
 
   const scheduler = buildSchedulerSlice(session, schedulerRunner, logger);
   entries.push(scheduler.entry);
@@ -407,7 +486,7 @@ export function buildBuiltinsCore(args: BuildBuiltinsArgs): BuiltBuiltinsCore {
   const webhooks = buildWebhooksSlice(webhookRunner, logger);
   entries.push(webhooks.entry);
 
-  const security = buildSecuritySlice(session, rawConfig);
+  const security = buildSecuritySlice(session, rawConfig, logger);
   entries.push(security.entry);
 
   return {

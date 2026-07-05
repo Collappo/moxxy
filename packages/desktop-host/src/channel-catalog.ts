@@ -88,6 +88,111 @@ export const CHANNEL_CATALOG: Readonly<Record<string, ChannelCatalogEntry>> = {
     vaultKeys: { botToken: 'telegram_bot_token' },
     requiredKeys: ['telegram_bot_token'],
   },
+  signal: {
+    descriptor: {
+      id: 'signal',
+      name: 'Signal',
+      description:
+        'A Signal linked device (signal-cli sidecar) on its own dedicated runner. Message your "Note to Self" to talk to moxxy; requires the signal-cli binary on PATH.',
+      docsUrl: 'https://github.com/AsamK/signal-cli/wiki/Quickstart',
+      configFields: [
+        {
+          name: 'account',
+          label: 'Account number (E.164)',
+          type: 'text',
+          required: true,
+          placeholder: '+15551234567',
+          help: 'The Signal account moxxy links to as a secondary device',
+        },
+      ],
+      hasWebhookUrl: false,
+      runHint:
+        'Scan the QR with your phone (Signal → Settings → Linked Devices → Link New Device); then message your own "Note to Self" to talk to moxxy.',
+      connect: {
+        kind: 'qr',
+        title: 'Link your Signal',
+        hint: 'On your phone: Signal → Settings → Linked Devices → Link New Device, then scan the QR.',
+      },
+    },
+    vaultKeys: { account: 'signal_account' },
+    requiredKeys: ['signal_account'],
+  },
+  whatsapp: {
+    descriptor: {
+      id: 'whatsapp',
+      name: 'WhatsApp',
+      description:
+        'A WhatsApp bot via Baileys on its own dedicated runner. UNOFFICIAL API: automating an ' +
+        'account violates WhatsApp\'s ToS and the number can be PERMANENTLY BANNED — use a ' +
+        'secondary number. Links by QR (Linked devices); no public URL needed.',
+      docsUrl: 'https://baileys.wiki',
+      configFields: [
+        {
+          name: 'tosAcknowledged',
+          label: "Risk acknowledgment — type 'yes'",
+          type: 'text',
+          required: true,
+          help:
+            "Typing anything other than 'yes' keeps the channel disarmed. This is the consent " +
+            'gate for the unofficial-API ban risk.',
+        },
+        {
+          name: 'allowedJids',
+          label: 'Extra allowed JIDs (comma-separated)',
+          type: 'text',
+          required: false,
+          placeholder: '15551234567@s.whatsapp.net',
+          help: 'Your own Note-to-Self chat is always allowed once linked.',
+        },
+      ],
+      hasWebhookUrl: false,
+      runHint:
+        'On your phone: WhatsApp -> Settings -> Linked devices -> Link a device, then scan the QR.',
+      connect: {
+        kind: 'qr',
+        title: 'Link WhatsApp',
+        hint:
+          'Scan with the phone that owns the account: WhatsApp -> Settings -> Linked devices -> ' +
+          'Link a device. The QR refreshes periodically until scanned.',
+      },
+    },
+    vaultKeys: {
+      tosAcknowledged: 'whatsapp_tos_acknowledged',
+      allowedJids: 'whatsapp_allowed_jids',
+    },
+    requiredKeys: ['whatsapp_tos_acknowledged'],
+  },
+  discord: {
+    descriptor: {
+      id: 'discord',
+      name: 'Discord',
+      description:
+        'A Discord bot (gateway WebSocket) on its own dedicated runner. No public URL needed; pairs an account via a DM code.',
+      docsUrl: 'https://discord.com/developers/applications',
+      configFields: [
+        {
+          name: 'botToken',
+          label: 'Bot token',
+          type: 'password',
+          required: true,
+          placeholder: 'MTIz…abc.def…',
+          help: 'Developer Portal → your app → Bot → Reset Token. Enable the MESSAGE CONTENT privileged intent on the same page.',
+        },
+      ],
+      hasWebhookUrl: false,
+      runHint:
+        'Open the invite link to add the bot to a server, then DM it — it replies with a one-time code; finish pairing with `moxxy discord pair` in a terminal.',
+      connect: {
+        kind: 'url',
+        title: 'Invite the bot',
+        hint: 'Open the link to invite the bot to your server, then DM it to receive a pairing code and finish with `moxxy discord pair`.',
+        openable: true,
+        openLabel: 'Open Discord authorization',
+      },
+    },
+    vaultKeys: { botToken: 'discord_bot_token' },
+    requiredKeys: ['discord_bot_token'],
+  },
 };
 
 /** Every catalog entry, in display order. */
