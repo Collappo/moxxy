@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ChannelDef } from '@moxxy/sdk';
 import { CHANNEL_CATALOG, listChannelCatalog, type ChannelCatalogEntry } from './channel-catalog';
+import { assertDefined } from '@moxxy/sdk';
 
 describe('CHANNEL_CATALOG', () => {
   it('pins the exact vault keys each channel plugin reads', () => {
@@ -101,6 +102,7 @@ const PLUGIN_LOADERS: Readonly<Record<string, () => Promise<PluginModule>>> = {
   signal: () => import('../../plugin-channel-signal/src/index.ts'),
   whatsapp: () => import('../../plugin-channel-whatsapp/src/index.ts'),
   discord: () => import('../../plugin-channel-discord/src/index.ts'),
+  imessage: () => import('../../plugin-channel-imessage/src/index.ts'),
 };
 
 type FieldContract = { readonly required: boolean; readonly type: 'password' | 'text' };
@@ -111,8 +113,12 @@ async function defContract(id: string): Promise<{
   readonly requiredKeys: ReadonlyArray<string>;
   readonly hasRequestUrl: boolean;
 }> {
-  const mod = await PLUGIN_LOADERS[id]!();
-  const config = mod.default?.channels?.[0]?.config;
+  const loader = PLUGIN_LOADERS[id];
+  assertDefined(loader, `plugin loader for channel "${id}"`);
+  const mod = await loader();
+  const channels = mod.default?.channels;
+  const firstChannel = channels?.[0];
+  const config = firstChannel?.config;
   if (!config) throw new Error(`no ChannelDef.config for channel "${id}"`);
   const fields = new Map<string, FieldContract>(
     config.fields.map((f) => [f.vaultKey, { required: f.required === true, type: f.secret ? 'password' : 'text' }]),
